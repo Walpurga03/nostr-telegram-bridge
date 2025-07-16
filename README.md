@@ -1,4 +1,3 @@
-```markdown
 # nostr-telegram-bridge
 
 Eine Bridge-Anwendung, die Nachrichten aus einer Telegram-Gruppe als Nostr-Nachrichten weiterleitet. Unterstützt NIP-04, NIP-17 und öffentliche Nachrichten.
