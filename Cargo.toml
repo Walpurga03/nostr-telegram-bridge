@@ -2,26 +2,19 @@
 name = "nostr-telegram-bridge"
 version = "0.1.0"
 edition = "2021"
-
 description = "Bridge zwischen Telegram und Nostr (DM-Weiterleitung Telegram → Nostr)"
 authors = ["<nostr:npub1hht9umpeet75w55uzs9lq6ksayfpcvl9lk64hye75j0yj4husq5ss8xsry>"]
+license = "MIT"
+repository = "https://github.com/yourusername/nostr-telegram-bridge"
+keywords = ["nostr", "telegram", "bridge", "nip-04", "encryption"]
+categories = ["network-programming"]
 
-[
-dependencies
-]
+[dependencies]
 teloxide = "0.12"
 nostr-sdk = "0.29"
 dotenv = "0.15"
 tokio = { version = "1.0", features = ["full"] }
 thiserror = "1.0"
-
-// In Cargo.toml
 log = "0.4"
 env_logger = "0.10"
-
-// In main.rs
-use log::{info, warn, error};
-
-// In main()
-env_logger::init();
-info!("Bridge startet...");
+chrono = "0.4"

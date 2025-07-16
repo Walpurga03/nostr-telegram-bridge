@@ -23,6 +23,8 @@ pub struct Config {
     pub nostr_public_key: String,
     /// Liste von Nostr-Relays
     pub nostr_relays: Vec<String>,
+    /// Verschlüsselungstyp: "nip04", "nip17", "public"
+    pub encryption_type: String,
 }
 
 impl Config {
@@ -37,11 +39,14 @@ impl Config {
             })?;
         let nostr_private_key = get_env_var("NOSTR_PRIVATE_KEY")?;
         let nostr_public_key = get_env_var("NOSTR_PUBLIC_KEY")?;
-        let nostr_relays = get_env_var("NOSTR_RELAYS")?
+        let nostr_relays: Vec<String> = get_env_var("NOSTR_RELAYS")?
             .split(',')
             .map(|s| s.trim().to_string())
-            .filter(|s| !s.is_empty())
             .collect();
+        
+        // Encryption type mit Default auf nip17
+        let encryption_type = env::var("ENCRYPTION_TYPE")
+            .unwrap_or_else(|_| "nip17".to_string());
 
         // Validierung
         if nostr_relays.is_empty() {
@@ -51,12 +56,22 @@ impl Config {
             });
         }
 
+        // Verschlüsselungstyp validieren
+        match encryption_type.as_str() {
+            "nip04" | "nip17" | "public" => {},
+            _ => return Err(ConfigError::InvalidValue {
+                var: "ENCRYPTION_TYPE".to_string(),
+                msg: "Muss 'nip04', 'nip17' oder 'public' sein".to_string(),
+            }),
+        }
+
         Ok(Self {
             telegram_bot_token,
             telegram_group_id,
             nostr_private_key,
             nostr_public_key,
             nostr_relays,
+            encryption_type,
         })
     }
 }
