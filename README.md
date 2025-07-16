@@ -195,4 +195,3 @@ MIT - Siehe [LICENSE](LICENSE)
 ---
 
 **Empfehlung**: Verwenden Sie NIP-17 für neue Installationen. NIP-04 nur für Legacy-Kompatibilität.
-```
