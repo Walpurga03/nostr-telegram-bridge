@@ -1,6 +1,6 @@
 # nostr-telegram-bridge
 
-Eine Bridge-Anwendung, die Nachrichten aus einer Telegram-Gruppe als Nostr-Nachrichten weiterleitet. Unterstützt NIP-04, NIP-17 und öffentliche Nachrichten.
+Eine Bridge-Anwendung, die Nachrichten aus einer Telegram-Gruppe als Nostr-Nachrichten weiterleitet. Unterstützt NIP-04, NIP-17, öffentliche Nachrichten und **Nostr-Gruppen (NIP-29)**.
 
 ## Features
 
@@ -8,6 +8,7 @@ Eine Bridge-Anwendung, die Nachrichten aus einer Telegram-Gruppe als Nostr-Nachr
 - **NIP-17** (Private Messages) - Standard
 - **NIP-04** (Legacy Encryption) - Kompatibilität
 - **Öffentliche Nachrichten** - Keine Verschlüsselung
+- **Nostr-Gruppen (NIP-29)** - Gruppen-Chat - **NEU!**
 - Multi-Relay-Support
 - Graceful Shutdown
 - Konfiguration über `.env`
@@ -19,6 +20,7 @@ Eine Bridge-Anwendung, die Nachrichten aus einer Telegram-Gruppe als Nostr-Nachr
 - Nostr-Schlüssel (Private Key)
 - Nostr Public Key (nur für verschlüsselte Nachrichten)
 - Telegram-Gruppen-ID
+- **Für Gruppen-Modus**: Nostr-Gruppen-Event-ID und Gruppen-Relay
 
 ## Installation
 
@@ -27,39 +29,36 @@ git clone https://github.com/yourusername/nostr-telegram-bridge.git
 cd nostr-telegram-bridge
 cargo build --release
 cp .env.example .env
-# .env-Datei bearbeiten
-```
 
 ## Konfiguration
-
-Erstellen Sie eine `.env`-Datei:
-
-```env
+Erstellen Sie eine .env-Datei:
 TELEGRAM_BOT_TOKEN=1234567890:ABCdefGHIjklMNOpqrsTUVwxyz
 TELEGRAM_GROUP_ID=-1001234567890
+
+# Nostr-Konfiguration
 NOSTR_PRIVATE_KEY=nsec1abcdef...
-NOSTR_PUBLIC_KEY=npub1abcdef...
+NOSTR_PUBLIC_KEY=npub1abcdef...  # Nur für nip04/nip17
+
+# Relay-Konfiguration
 NOSTR_RELAYS=wss://relay.damus.io,wss://nos.lol,wss://relay.snort.social
+
+# Verschlüsselungstyp
 ENCRYPTION_TYPE=nip17
-```
 
-### Verschlüsselungstypen
+## Verschlüsselungstypen
+Typ	    Beschreibung	                      Empfänger nötig
+nip17	Moderne private Nachrichten (Standard)	✅
+nip04	Legacy-Verschlüsselung (Kompatibilität)	✅
+public	Öffentliche Nachrichten	                ❌
 
-| Typ | Beschreibung | Empfänger nötig |
-|-----|-------------|-----------------|
-| `nip17` | **Moderne private Nachrichten** (Standard) | ✅ |
-| `nip04` | Legacy-Verschlüsselung (Kompatibilität) | ✅ |
-| `public` | Öffentliche Nachrichten | ❌ |
+## Setup-Schritte
+Telegram Bot erstellen: /newbot an @BotFather
+Bot zur Gruppe hinzufügen: Leserechte geben
+Gruppen-ID ermitteln:
 
-### Setup-Schritte
+curl -s "https://api.telegram.org/bot<TOKEN>/getUpdates" | jq '.result[].message.chat.id'
 
-1. **Telegram Bot erstellen**: `/newbot` an [@BotFather](https://t.me/botfather)
-2. **Bot zur Gruppe hinzufügen**: Leserechte geben
-3. **Gruppen-ID ermitteln**: 
-   ```bash
-   curl -s "https://api.telegram.org/bot<TOKEN>/getUpdates" | jq '.result[].message.chat.id'
-   ```
-4. **Nostr-Schlüssel generieren**: z.B. über [nostrtool.com](https://nostrtool.com/)
+Nostr-Schlüssel generieren: z.B. über nostrtool.com
 
 ## Verwendung
 
@@ -71,10 +70,9 @@ RUST_LOG=info cargo run
 ./target/release/nostr-telegram-bridge
 ```
 
-### Nachrichtenformat
+## Nachrichtenformat
+NIP-17 / NIP-04 (Verschlüsselt)
 
-#### NIP-17 / NIP-04 (Verschlüsselt)
-```
 📱 Telegram-Nachricht
 👤 Von: Max Mustermann
 📅 Zeit: 2024-01-15 14:30:25
@@ -82,17 +80,13 @@ RUST_LOG=info cargo run
 Ursprünglicher Nachrichtentext...
 ```
 
-#### Öffentliche Nachrichten
-```
+## Öffentliche Nachrichten
 📱 Telegram-Weiterleitung:
 Von: Max Mustermann (14:30)
 
 Ursprünglicher Nachrichtentext...
-```
 
-### Verschlüsselungstyp wechseln
-
-```bash
+## Verschlüsselungstyp wechseln
 # NIP-17 (empfohlen)
 echo "ENCRYPTION_TYPE=nip17" >> .env
 
@@ -105,7 +99,7 @@ echo "ENCRYPTION_TYPE=public" >> .env
 
 ## Systemd-Service
 
-```ini
+### Systemd-Service
 [Unit]
 Description=Nostr Telegram Bridge
 After=network.target
@@ -123,15 +117,12 @@ WantedBy=multi-user.target
 ```
 
 ## Sicherheit
-
-- **Niemals** Private Keys oder Bot Token in Git committen
-- `.env`-Datei: `chmod 600 .env`
-- **NIP-17 verwenden** für beste Sicherheit
-- Separate Schlüssel für Development/Production
+Niemals Private Keys oder Bot Token in Git committen
+.env-Datei: chmod 600 .env
+NIP-17 verwenden für beste Sicherheit
+Separate Schlüssel für Development/Production
 
 ## Fehlerbehandlung
-
-```bash
 # Debug-Logs
 RUST_LOG=debug cargo run
 
@@ -140,7 +131,6 @@ RUST_LOG=debug cargo run
 # - Nostr-Keys: nsec/npub Format prüfen
 # - Bei "public": NOSTR_PUBLIC_KEY kann leer bleiben
 # - Verschlüsselungstyp: nip04/nip17/public
-```
 
 ## Vergleich der Verschlüsselungstypen
 
@@ -166,32 +156,23 @@ RUST_LOG=debug cargo run
 ## Beispiel-Konfigurationen
 
 ### Für maximale Sicherheit (NIP-17)
-```env
 ENCRYPTION_TYPE=nip17
 NOSTR_PUBLIC_KEY=npub1empfaenger...
-```
 
 ### Für Kompatibilität (NIP-04)
-```env
 ENCRYPTION_TYPE=nip04
 NOSTR_PUBLIC_KEY=npub1empfaenger...
-```
 
 ### Für öffentliche Gruppen
-```env
 ENCRYPTION_TYPE=public
 # NOSTR_PUBLIC_KEY nicht erforderlich
-```
 
 ## Lizenz
-
-MIT - Siehe [LICENSE](LICENSE)
+MIT - Siehe LICENSE
 
 ## Support
+Issues: GitHub Issues
+Nostr: Kontakt über Nostr (siehe Cargo.toml)
 
-- **Issues**: [GitHub Issues](https://github.com/yourusername/nostr-telegram-bridge/issues)
-- **Nostr**: Kontakt über Nostr (siehe Cargo.toml)
 
----
-
-**Empfehlung**: Verwenden Sie NIP-17 für neue Installationen. NIP-04 nur für Legacy-Kompatibilität.
+Empfehlung: Verwenden Sie NIP-17 für neue Installationen. NIP-04 nur für Legacy-Kompatibilität.

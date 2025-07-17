@@ -2,13 +2,14 @@ use teloxide::prelude::*;
 use teloxide::types::Message;
 use dotenv::dotenv;
 use nostr_sdk::prelude::*;
+use nostr_sdk::Kind;
 use tokio::signal;
 use std::sync::Arc;
 use thiserror::Error;
 use log::{info, warn, error, debug};
 
 mod config;
-use crate::config::{Config, ConfigError};
+use crate::config::{Config, ConfigError, EncryptionType};
 
 #[derive(Error, Debug)]
 pub enum BridgeError {
@@ -25,13 +26,22 @@ pub enum BridgeError {
 type Result<T> = std::result::Result<T, BridgeError>;
 
 /// Initialisiert den Nostr-Client und fügt alle Relays hinzu
-async fn init_nostr_client(keys: &Keys, relays: &[String]) -> Result<Client> {
+async fn init_nostr_client(keys: &Keys, relays: &[String], config: &Config) -> Result<Client> {
     let client = Client::new(keys);
     
+    // Standard-Relays hinzufügen
     for url in relays {
         match client.add_relay(url.clone()).await {
             Ok(_) => info!("Relay hinzugefügt: {}", url),
             Err(e) => warn!("Fehler beim Hinzufügen des Relays {}: {}", url, e),
+        }
+    }
+    
+    // Gruppen-Relay separat hinzufügen (falls vorhanden)
+    if let Some(group_relay) = config.get_group_relay() {
+        match client.add_relay(group_relay.to_string()).await {
+            Ok(_) => info!("Gruppen-Relay hinzugefügt: {}", group_relay),
+            Err(e) => warn!("Fehler beim Hinzufügen des Gruppen-Relays {}: {}", group_relay, e),
         }
     }
     
@@ -44,41 +54,73 @@ async fn init_nostr_client(keys: &Keys, relays: &[String]) -> Result<Client> {
 async fn send_to_nostr(
     client: &Client,
     keys: &Keys,
-    recipient_pubkey: &PublicKey,
+    recipient_pubkey: Option<&PublicKey>,
     text: &str,
-    encryption_type: &str,
+    config: &Config,
 ) -> Result<EventId> {
-    debug!("Sende {} Nachricht: {}", encryption_type, &text[..text.len().min(50)]);
-    
-    let event_builder = match encryption_type {
-        "nip04" => {
+    debug!("Sende {:?} Nachricht: {}", config.encryption_type, &text[..text.len().min(50)]);
+
+    let event_builder = match config.encryption_type {
+        EncryptionType::Nip04 => {
             info!("Sende NIP-04 verschlüsselte Nachricht...");
-            // NIP-04 Methode
-            EventBuilder::encrypted_direct_msg(keys, *recipient_pubkey, text, None)
+            let recipient = recipient_pubkey.ok_or_else(|| 
+                BridgeError::Config(ConfigError::InvalidValue {
+                    var: "NOSTR_PUBLIC_KEY".to_string(),
+                    msg: "Empfänger-Pubkey für NIP-04 erforderlich".to_string(),
+                })
+            )?;
+            EventBuilder::encrypted_direct_msg(keys, *recipient, text, None)
                 .map_err(|e| BridgeError::EventBuild(e.to_string()))?
         },
-        "nip17" => {
+        EncryptionType::Nip17 => {
             info!("Sende NIP-17 private Nachricht...");
-            // Fallback auf NIP-04 wenn NIP-17 nicht verfügbar ist
-            EventBuilder::encrypted_direct_msg(keys, *recipient_pubkey, text, None)
+            let recipient = recipient_pubkey.ok_or_else(|| 
+                BridgeError::Config(ConfigError::InvalidValue {
+                    var: "NOSTR_PUBLIC_KEY".to_string(),
+                    msg: "Empfänger-Pubkey für NIP-17 erforderlich".to_string(),
+                })
+            )?;
+            // Verwende NIP-17 wenn verfügbar, sonst fallback auf NIP-04
+            EventBuilder::encrypted_direct_msg(keys, *recipient, text, None)
                 .map_err(|e| BridgeError::EventBuild(e.to_string()))?
         },
-        "public" => {
+        EncryptionType::Public => {
             info!("Sende öffentliche Nachricht...");
             let public_text = format!("📱 Telegram-Weiterleitung:\n{}", text);
             EventBuilder::text_note(public_text, Vec::new())
         },
-        _ => return Err(BridgeError::Config(ConfigError::InvalidValue {
-            var: "ENCRYPTION_TYPE".to_string(),
-            msg: "Unbekannter Verschlüsselungstyp".to_string(),
-        })),
+        EncryptionType::Group => {
+            info!("Sende Gruppen-Nachricht...");
+            let group_event_id = EventId::from_hex(
+                config.get_group_event_id().ok_or_else(|| 
+                    BridgeError::Config(ConfigError::InvalidValue {
+                        var: "NOSTR_GROUP_EVENT_ID".to_string(),
+                        msg: "Gruppen-Event-ID fehlt".to_string(),
+                    })
+                )?
+            ).map_err(|e| BridgeError::EventBuild(e.to_string()))?;
+        
+            
+            // NIP-29 Gruppen-Nachricht (Kind 9) - KORRIGIERT
+            EventBuilder::new(
+                Kind::Custom(9),
+                text,
+                vec![
+                    Tag::event(group_event_id), // KORRIGIERT: Tag::event statt Tag::Event
+                    Tag::Generic(
+                        TagKind::Custom("h".to_string().into()), // KORRIGIERT: .into() für Cow<str>
+                        vec![hex::encode(group_event_id.as_bytes())],
+                    ),
+                ],
+            )
+        }
     };
     
     let event = event_builder.to_event(keys)
         .map_err(|e| BridgeError::EventBuild(e.to_string()))?;
     
     let event_id = client.send_event(event).await?;
-    info!("Nachricht ({}) an Nostr gesendet! Event-ID: {}", encryption_type, event_id);
+    info!("Nachricht ({:?}) an Nostr gesendet! Event-ID: {}", config.encryption_type, event_id);
     Ok(event_id)
 }
 
@@ -88,7 +130,7 @@ async fn handle_telegram_message(
     client: Arc<Client>,
     config: Arc<Config>,
     keys: Arc<Keys>,
-    recipient_pubkey: PublicKey,
+    recipient_pubkey: Option<PublicKey>,
 ) -> Result<()> {
     debug!("Nachricht empfangen von Chat-ID: {}", message.chat.id.0);
 
@@ -106,29 +148,40 @@ async fn handle_telegram_message(
         info!("Verarbeite Nachricht von: {}", sender_name);
 
         // Telegram-Datum (Unix-Timestamp) in lesbares Format umwandeln
-        #[allow(deprecated)]
-        let dt = chrono::NaiveDateTime::from_timestamp(message.date.timestamp(), 0);
+        let dt = chrono::DateTime::from_timestamp(message.date.timestamp(), 0)
+            .unwrap_or_else(|| chrono::Utc::now());
         let time_str = dt.format("%Y-%m-%d %H:%M:%S").to_string();
         let time_short = dt.format("%H:%M").to_string();
 
         // Formatiere die Nachricht mit Metadaten
-        let formatted_message = if config.encryption_type == "public" {
-            format!(
-                "Von: {} ({})\n\n{}",
-                sender_name,
-                time_short,
-                text
-            )
-        } else {
-            format!(
-                "📱 Telegram-Nachricht\n👤 Von: {}\n📅 Zeit: {}\n\n{}",
-                sender_name,
-                time_str,
-                text
-            )
+        let formatted_message = match config.encryption_type {
+            EncryptionType::Public => {
+                format!(
+                    "Von: {} ({})\n\n{}",
+                    sender_name,
+                    time_short,
+                    text
+                )
+            },
+            EncryptionType::Group => {
+                format!(
+                    "📱 Telegram → Nostr Gruppe\n👤 Von: {} ({})\n\n{}",
+                    sender_name,
+                    time_short,
+                    text
+                )
+            },
+            _ => {
+                format!(
+                    "📱 Telegram-Nachricht\n👤 Von: {}\n📅 Zeit: {}\n\n{}",
+                    sender_name,
+                    time_str,
+                    text
+                )
+            }
         };
 
-        if let Err(e) = send_to_nostr(&client, &keys, &recipient_pubkey, &formatted_message, &config.encryption_type).await {
+        if let Err(e) = send_to_nostr(&client, &keys, recipient_pubkey.as_ref(), &formatted_message, &config).await {
             error!("Fehler beim Senden an Nostr: {}", e);
         }
     }
@@ -149,7 +202,7 @@ async fn main() -> Result<()> {
     // Konfiguration laden
     let config = Arc::new(Config::from_env()?);
     info!("Konfiguration geladen");
-    info!("Verschlüsselungstyp: {}", config.encryption_type);
+    info!("Verschlüsselungstyp: {:?}", config.encryption_type);
 
     // Nostr-Keys und Client initialisieren
     let keys = Arc::new(
@@ -157,23 +210,42 @@ async fn main() -> Result<()> {
             .map_err(|e| BridgeError::KeyParsing(e.to_string()))?
     );
     
-    let recipient_pubkey = if config.encryption_type == "public" {
-        // Bei öffentlichen Nachrichten wird der Empfänger nicht gebraucht
-        keys.public_key()
+    // Empfänger-Pubkey nur für verschlüsselte Modi
+    let recipient_pubkey = if config.needs_encryption() {
+        let pubkey_str = config.nostr_public_key.as_ref()
+            .ok_or_else(|| BridgeError::Config(ConfigError::InvalidValue {
+                var: "NOSTR_PUBLIC_KEY".to_string(),
+                msg: "Empfänger-Pubkey für verschlüsselte Modi erforderlich".to_string(),
+            }))?;
+        Some(PublicKey::from_bech32(pubkey_str)
+            .map_err(|e| BridgeError::KeyParsing(e.to_string()))?)
     } else {
-        PublicKey::from_bech32(&config.nostr_public_key)
-            .map_err(|e| BridgeError::KeyParsing(e.to_string()))?
+        None
     };
     
-    let client = Arc::new(init_nostr_client(&keys, &config.nostr_relays).await?);
+    let client = Arc::new(init_nostr_client(&keys, &config.nostr_relays, &config).await?);
 
-    info!("🚀 Bridge läuft ({})", config.encryption_type.to_uppercase());
+    info!("🚀 Bridge läuft ({:?})", config.encryption_type);
     info!("📱 Telegram-Gruppe: {}", config.telegram_group_id);
     
-    if config.encryption_type != "public" {
-        info!("🔒 Nostr-Empfänger: {}", config.nostr_public_key);
-    } else {
-        info!("🌐 Öffentliche Nachrichten aktiviert");
+    match config.encryption_type {
+        EncryptionType::Public => {
+            info!("🌐 Öffentliche Nachrichten aktiviert");
+        },
+        EncryptionType::Group => {
+            info!("👥 Gruppen-Modus aktiviert");
+            if let Some(group_id) = config.get_group_event_id() {
+                info!("🔗 Gruppen-Event-ID: {}", group_id);
+            }
+            if let Some(group_relay) = config.get_group_relay() {
+                info!("📡 Gruppen-Relay: {}", group_relay);
+            }
+        },
+        _ => {
+            if let Some(ref pubkey) = config.nostr_public_key {
+                info!("🔒 Nostr-Empfänger: {}", pubkey);
+            }
+        }
     }
 
     let bot = Bot::new(&config.telegram_bot_token);
