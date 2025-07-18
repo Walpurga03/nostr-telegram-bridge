@@ -1,324 +1,198 @@
-Hier ist die aktualisierte README.md mit der Gruppen-Funktionalität:
-
-```markdown
+[🇩🇪 Deutsch](README.de.md)
 # nostr-telegram-bridge
 
-Eine Bridge-Anwendung, die Nachrichten aus einer Telegram-Gruppe als Nostr-Nachrichten weiterleitet. Unterstützt NIP-04, NIP-17, öffentliche Nachrichten und **Nostr-Gruppen (NIP-29)**.
+A bridge application that forwards messages from a Telegram group to Nostr. Supports NIP-04, NIP-17, public messages, and Nostr groups (NIP-29).
 
 ## Features
 
-- Telegram-Gruppe → Nostr Weiterleitung
-- **NIP-17** (Private Messages) - Standard
-- **NIP-04** (Legacy Encryption) - Kompatibilität
-- **Öffentliche Nachrichten** - Keine Verschlüsselung
-- **Nostr-Gruppen (NIP-29)** - Gruppen-Chat - **NEU!**
-- Multi-Relay-Support
-- Graceful Shutdown
-- Konfiguration über `.env`
+- 📱 Telegram group → Nostr forwarding
+- 🔒 **NIP-17** (private messages) – default
+- 🔐 **NIP-04** (legacy encryption) – compatibility
+- 🌐 **Public messages** – no encryption
+- 👥 **Nostr groups (NIP-29)** – group chat
+- 🔄 Multi-relay support
+- 🛑 Graceful shutdown
+- ⚙️ Configuration via `.env`
 
-## Voraussetzungen
+## Requirements
 
 - Rust 1.70+
-- Telegram Bot Token
-- Nostr-Schlüssel (Private Key)
-- Nostr Public Key (nur für verschlüsselte Nachrichten)
-- Telegram-Gruppen-ID
-- **Für Gruppen-Modus**: Nostr-Gruppen-Event-ID und Gruppen-Relay
+- Telegram bot token
+- Nostr private key
+- Nostr public key (only for encrypted messages)
+- Telegram group ID
+- **For group mode:** Nostr group event ID and group relay
 
 ## Installation
 
 ```bash
-git clone https://github.com/yourusername/nostr-telegram-bridge.git
+git clone https://github.com/Walpurga03/nostr-telegram-bridge.git
 cd nostr-telegram-bridge
 cargo build --release
 cp .env.example .env
 ```
 
-## Konfiguration
+## Quickstart
 
-Erstellen Sie eine `.env`-Datei:
+1. Configure `.env` (see below)
+2. Start the bridge: `cargo run`
+3. Send a message in your Telegram group → It appears on Nostr
+
+## Configuration
+
+Example `.env`:
 
 ```env
-# Telegram-Konfiguration
+# Telegram configuration
 TELEGRAM_BOT_TOKEN=1234567890:ABCdXXXXXXXXXXXXXXXXXXXXXXx
 TELEGRAM_GROUP_ID=-1001XXXXXXXXXXXXx
 
-# Nostr-Konfiguration
+# Nostr configuration
 NOSTR_PRIVATE_KEY=nsec1abcdef...
-NOSTR_PUBLIC_KEY=npub1abcdef...  # Nur für nip04/nip17
+NOSTR_PUBLIC_KEY=npub1abcdef...  # Only for nip04/nip17
 
-# Relay-Konfiguration
+# Relay configuration
 NOSTR_RELAYS=wss://relay.damus.io,wss://nos.lol,wss://relay.snort.social
 
-# Verschlüsselungstyp
+# Encryption type
 ENCRYPTION_TYPE=nip17
 
-# Gruppen-Konfiguration (nur für ENCRYPTION_TYPE=group)
+# Group configuration (only for ENCRYPTION_TYPE=group)
 NOSTR_GROUP_EVENT_ID=dde39dbaf95c637ea8XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
 NOSTR_GROUP_RELAY=wss://groups.0xchat.com
 ```
 
-## Verschlüsselungstypen
+## Encryption types
 
-| Typ      | Beschreibung                           | Empfänger nötig | Spezielle Config     |
-|----------|----------------------------------------|-----------------|----------------------|
-| `nip17`  | Moderne private Nachrichten (Standard)| ✅              | ❌                   |
-| `nip04`  | Legacy-Verschlüsselung (Kompatibilität)| ✅              | ❌                   |
-| `public` | Öffentliche Nachrichten                | ❌              | ❌                   |
-| `group`  | Nostr-Gruppen (NIP-29) - **NEU!**     | ❌              | ✅ Event-ID + Relay  |
+| Type     | Description                          | Recipient needed | Special config         |
+|----------|--------------------------------------|------------------|------------------------|
+| `nip17`  | Modern private messages (default)    | ✅               | ❌                     |
+| `nip04`  | Legacy encryption (compatibility)    | ✅               | ❌                     |
+| `public` | Public messages                      | ❌               | ❌                     |
+| `group`  | Nostr groups (NIP-29)                | ❌               | ✅ Event ID + relay    |
 
-## Setup-Schritte
+## Setup steps
 
-### 1. Telegram Bot erstellen
+### 1. Create a Telegram bot
+1. Send `/newbot` to [@BotFather](https://t.me/BotFather)
+2. Follow the instructions and copy the bot token
+3. Add the bot to your Telegram group
+4. Give the bot **read permissions** in the group
+
+### 2. Get the Telegram group ID
 ```bash
-# Telegram: /newbot an @BotFather
-# Bot zur Gruppe hinzufügen: Leserechte geben
+# Replace <YOUR_BOT_TOKEN> and run
+curl -s "https://api.telegram.org/bot<YOUR_BOT_TOKEN>/getUpdates" | jq '.result[].message.chat.id'
 ```
 
-### 2. Gruppen-ID ermitteln
+### 3. Generate Nostr keys
+- **Online**: [nostrtool.com](https://nostrtool.com)
+- **CLI**: Use the `nostr-cli` tool
+
+### 4. For group mode: Set up a Nostr group
+- **Option A**: Use an existing group (e.g. via [0xchat](https://0xchat.com))
+- **Option B**: Create a new group
+
+#### Find the group event ID
 ```bash
-curl -s "https://api.telegram.org/bot<TOKEN>/getUpdates" | jq '.result[].message.chat.id'
+# In 0xchat: Group info → Copy event ID
+# Format: 64-character hex string
+# Example: dde39dbaf95c637ea8785583e4c1a64be0462f3609695592c433ee6697b19815
 ```
 
-### 3. Nostr-Schlüssel generieren
-- Über [nostrtool.com](https://nostrtool.com) oder
-- Mit `nostr-cli` Tool
-
-### 4. Für Gruppen-Modus: Nostr-Gruppe setup
-- **Option A**: Bestehende Gruppe verwenden (z.B. über 0xchat)
-- **Option B**: Neue Gruppe erstellen (siehe Gruppen-Setup)
-
-## Verwendung
+## Usage
 
 ```bash
-# Entwicklung
+# Development
 RUST_LOG=info cargo run
 
-# Produktion
+# Production
 ./target/release/nostr-telegram-bridge
 
-# Debug-Modus
+# Debug mode (verbose logs)
 RUST_LOG=debug cargo run
 ```
 
-## Nachrichtenformate
+### Message flow
+1. **Telegram**: Send a message in the configured group
+2. **Bridge**: Receives and formats the message
+3. **Nostr**: Message is forwarded according to `ENCRYPTION_TYPE`
 
-### NIP-17 / NIP-04 (Verschlüsselt)
-```
-📱 Telegram-Nachricht
-👤 Von: Max Mustermann
-📅 Zeit: 2024-01-15 14:30:25
+## Security
 
-Ursprünglicher Nachrichtentext...
-```
+- ❌ **Never** commit private keys or bot tokens to git
+- 🔒 Secure your `.env` file: `chmod 600 .env`
+- 🛡️ Use **NIP-17** for best security
+- 🔑 Use separate keys for development/production
+- 👥 Check group permissions
 
-### Öffentliche Nachrichten
-```
-📱 Telegram-Weiterleitung:
-Von: Max Mustermann (14:30)
+## Troubleshooting
 
-Ursprünglicher Nachrichtentext...
-```
+### Common issues
 
-### Nostr-Gruppen (NIP-29) - **NEU!**
-```
-📱 Telegram → Nostr Gruppe
-👤 Von: Max Mustermann (14:30)
-
-Ursprünglicher Nachrichtentext...
-```
-
-## Konfigurationsbeispiele
-
-### Für maximale Sicherheit (NIP-17)
-```env
-ENCRYPTION_TYPE=nip17
-NOSTR_PUBLIC_KEY=npub1empfaenger...
-```
-
-### Für Kompatibilität (NIP-04)
-```env
-ENCRYPTION_TYPE=nip04
-NOSTR_PUBLIC_KEY=npub1empfaenger...
-```
-
-### Für öffentliche Gruppen
-```env
-ENCRYPTION_TYPE=public
-# NOSTR_PUBLIC_KEY nicht erforderlich
-```
-
-### Für Nostr-Gruppen (NIP-29) - **NEU!**
-```env
-ENCRYPTION_TYPE=group
-NOSTR_GROUP_EVENT_ID=dde39dbaf95c637ea8785583e4c1a64be0462f3609695592c433ee6697b19815
-NOSTR_GROUP_RELAY=wss://groups.0xchat.com
-# NOSTR_PUBLIC_KEY nicht erforderlich
-```
-
-## Gruppen-Setup (NIP-29)
-
-### Bestehende Gruppe verwenden
-1. **0xchat öffnen**: [0xchat.com](https://0xchat.com)
-2. **Gruppe beitreten**: Gruppen-Link verwenden
-3. **Event-ID kopieren**: Aus Gruppen-Info
-4. **Relay notieren**: Meist `wss://groups.0xchat.com`
-
-### Neue Gruppe erstellen
+**❌ Telegram group ID format**
 ```bash
-# Mit 0xchat Client:
-# 1. "Create Group" klicken
-# 2. Name und Beschreibung eingeben
-# 3. Event-ID aus URL kopieren
-# 4. Relay-URL notieren
+TELEGRAM_GROUP_ID=-1001234567890  # ✅ Correct (negative!)
+TELEGRAM_GROUP_ID=1234567890      # ❌ Incorrect (positive)
 ```
 
-### Gruppen-Event-ID finden
+**❌ Nostr key format**
 ```bash
-# In 0xchat: Gruppen-Info → Event-ID
-# Format: 64 Zeichen Hex-String
-dde39dbaf95c637ea8785583e4c1a64be0462f3609695592c433ee6697b19815
+NOSTR_PRIVATE_KEY=nsec1...  # ✅ Correct (nsec1 prefix)
+NOSTR_PUBLIC_KEY=npub1...   # ✅ Correct (npub1 prefix)
 ```
 
-## Verschlüsselungstyp wechseln
-
+**❌ Group permissions**
 ```bash
-# NIP-17 (empfohlen)
-echo "ENCRYPTION_TYPE=nip17" >> .env
-
-# NIP-04 (legacy)
-echo "ENCRYPTION_TYPE=nip04" >> .env
-
-# Öffentlich
-echo "ENCRYPTION_TYPE=public" >> .env
-
-# Gruppen-Modus - NEU!
-echo "ENCRYPTION_TYPE=group" >> .env
+# Bot is not authorized in the Nostr group
+# Solution: Group admin must grant bot permission
 ```
 
-## Systemd-Service
-
-```ini
-[Unit]
-Description=Nostr Telegram Bridge
-After=network.target
-
-[Service]
-Type=simple
-User=your-user
-WorkingDirectory=/path/to/nostr-telegram-bridge
-ExecStart=/path/to/nostr-telegram-bridge/target/release/nostr-telegram-bridge
-Restart=always
-Environment=RUST_LOG=info
-
-[Install]
-WantedBy=multi-user.target
-```
-
-## Sicherheit
-
-- ✅ Niemals Private Keys oder Bot Token in Git committen
-- ✅ `.env`-Datei: `chmod 600 .env`
-- ✅ NIP-17 verwenden für beste Sicherheit
-- ✅ Separate Schlüssel für Development/Production
-- ✅ Gruppen-Berechtigung prüfen
-
-## Monitoring und Logs
-
+**❌ Relay connection**
 ```bash
-# Debug-Logs
-RUST_LOG=debug cargo run
-
-# Wichtige Log-Nachrichten:
-# ✅ "👥 Gruppen-Modus aktiviert"
-# ✅ "📡 Gruppen-Relay: wss://groups.0xchat.com"
-# ✅ "🔗 Gruppen-Event-ID: dde39..."
-# ✅ "Nachricht (Group) an Nostr gesendet!"
-```
-
-## Fehlerbehandlung
-
-### Häufige Probleme:
-
-**Gruppen-ID muss negativ sein:**
-```bash
-TELEGRAM_GROUP_ID=-1001234567890  # ✅ Korrekt
-TELEGRAM_GROUP_ID=1234567890      # ❌ Falsch
-```
-
-**Nostr-Keys Format prüfen:**
-```bash
-NOSTR_PRIVATE_KEY=nsec1...  # ✅ Korrekt
-NOSTR_PUBLIC_KEY=npub1...   # ✅ Korrekt
-```
-
-**Gruppen-Berechtigung:**
-```bash
-# Prüfen Sie, ob Ihr Bot in der Nostr-Gruppe schreiben darf
-# Gruppen-Admin muss Bot-Berechtigung erteilen
-```
-
-**Relay-Verbindung:**
-```bash
-# Gruppen-Relay testen
+# Test group relay
 curl -I wss://groups.0xchat.com
+# Should return "101 Switching Protocols"
 ```
 
-## Vergleich der Verschlüsselungstypen
+## Encryption type comparison
 
-### NIP-17 (Empfohlen)
-- ✅ Moderne Kryptografie
-- ✅ Bessere Metadaten-Verschleierung
-- ✅ Schutz vor Timing-Angriffen
-- ✅ Zukunftssicher
-- ⚠️ Neuere Clients erforderlich
+### 🔒 NIP-17 (recommended)
+- ✅ Modern cryptography
+- ✅ Better metadata protection
+- ✅ Protection against timing attacks
+- ✅ Future-proof
+- ⚠️ Requires newer clients
 
-### NIP-04 (Legacy)
-- ✅ Maximale Client-Kompatibilität
-- ✅ Bewährte Technologie
-- ⚠️ Ältere Kryptografie
-- ⚠️ Metadaten-Leaks möglich
+### 🔐 NIP-04 (legacy)
+- ✅ Maximum client compatibility
+- ✅ Proven technology
+- ⚠️ Older cryptography
+- ⚠️ Possible metadata leaks
 
-### Öffentlich
-- ✅ Keine Verschlüsselung nötig
-- ✅ Maximale Kompatibilität
-- ✅ Einfache Einrichtung
-- ⚠️ Jeder kann mitlesen
+### 🌐 Public
+- ✅ No encryption needed
+- ✅ Maximum compatibility
+- ✅ Simple setup
+- ⚠️ Anyone can read
 
-### Gruppen (NIP-29) - **NEU!**
-- ✅ Gruppen-Chat-Funktionalität
-- ✅ Keine Empfänger-Konfiguration nötig
-- ✅ Skalierbar für viele Nutzer
-- ✅ Moderierbar durch Admins
-- ⚠️ Gruppen-Setup erforderlich
-- ⚠️ NIP-29 Client-Support nötig
+### 👥 Groups (NIP-29)
+- ✅ Group chat functionality
+- ✅ No recipient config needed
+- ✅ Scalable for many users
+- ✅ Moderatable by admins
+- ⚠️ Group setup required
+- ⚠️ NIP-29 client support needed
 
-## Lizenz
+## License
 
-MIT - Siehe LICENSE
+MIT – See [LICENSE](LICENSE)
 
 ## Support
 
-- **Issues**: GitHub Issues
-- **Nostr**: Kontakt über Nostr (siehe Cargo.toml)
-- **Telegram**: Community-Support
+- 🐛 **Issues**: [GitHub Issues](https://github.com/Walpurga03/nostr-telegram-bridge/issues)
+- 🐾 **Nostr**: `npub192jd2dxlqwfnemzz8hsk77z2rn4de3thelw6suvtvqsl79d0udysxzuswy`
 
 ---
 
-**Empfehlung**: 
-- Verwenden Sie **NIP-17** für private Nachrichten
-- Verwenden Sie **Gruppen-Modus** für Community-Chats
-- NIP-04 nur für Legacy-Kompatibilität
-```
-
-Die wichtigsten Ergänzungen:
-
-1. **Gruppen-Modus** in der Feature-Liste
-2. **Erweiterte Konfigurationstabelle** mit Gruppen-Zeile
-3. **Gruppen-Setup Sektion** mit detaillierten Anweisungen
-4. **Neues Nachrichtenformat** für Gruppen
-5. **Konfigurationsbeispiel** für Gruppen-Modus
-6. **Erweiterte Fehlerbehandlung** für Gruppen-spezifische Probleme
-7. **Vergleichstabelle** mit Gruppen-Vor-/Nachteilen
-
-Die README ist jetzt vollständig und erklärt alle vier Modi: NIP-04, NIP-17, Public und Groups!
+**💡 Tip:** For getting started, we recommend the **NIP-17 mode** for private messages or **group mode** for community chats.

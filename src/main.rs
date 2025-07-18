@@ -7,6 +7,9 @@ use tokio::signal;
 use std::sync::Arc;
 use thiserror::Error;
 use log::{info, warn, error, debug};
+use chrono::{NaiveDateTime, TimeZone};
+use chrono_tz::Tz;
+use std::env;
 
 mod config;
 use crate::config::{Config, ConfigError, EncryptionType};
@@ -148,10 +151,16 @@ async fn handle_telegram_message(
         info!("Verarbeite Nachricht von: {}", sender_name);
 
         // Telegram-Datum (Unix-Timestamp) in lesbares Format umwandeln
-        let dt = chrono::DateTime::from_timestamp(message.date.timestamp(), 0)
-            .unwrap_or_else(|| chrono::Utc::now());
-        let time_str = dt.format("%Y-%m-%d %H:%M:%S").to_string();
-        let time_short = dt.format("%H:%M").to_string();
+        let tz: Tz = env::var("TIMEZONE")
+            .unwrap_or_else(|_| "Europe/Berlin".to_string())
+            .parse()
+            .unwrap_or(chrono_tz::Europe::Berlin);
+
+        #[allow(deprecated)]
+        let dt = NaiveDateTime::from_timestamp(message.date.timestamp(), 0);
+        let local_dt = tz.from_utc_datetime(&dt);
+        let time_str = local_dt.format("%Y-%m-%d %H:%M:%S").to_string();
+        let time_short = local_dt.format("%H:%M").to_string();
 
         // Formatiere die Nachricht mit Metadaten
         let formatted_message = match config.encryption_type {
