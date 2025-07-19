@@ -195,4 +195,15 @@ MIT – Siehe [LICENSE](LICENSE)
 
 ---
 
+## 🙏 Unterstützen & Danke sagen
+
+Wenn dir das Projekt gefällt und du Danke sagen möchtest, unterstütze die Entwicklung gerne mit:
+
+- ⚡ **Lightning**: `aldo.barazutti@walletofsatoshi.com`
+- ⚡ **Nostr zap**: [npub192jd2dxlqwfnemzz8hsk77z2rn4de3thelw6suvtvqsl79d0udysxzuswy]
+
+Danke für deine Unterstützung! 🚀
+
+---
+
 **💡 Tipp**: Für den Einstieg empfehlen wir den **NIP-17 Modus** für private Nachrichten oder **Gruppen-Modus** für Community-Chats.

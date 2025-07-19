@@ -195,4 +195,15 @@ MIT – See [LICENSE](LICENSE)
 
 ---
 
+## 🙏 Support & Donate
+
+If you like this project and want to say thank you, you can support the development via:
+
+- ⚡ **Lightning**: `aldo.barazutti@walletofsatoshi.com`
+- ⚡ **Nostr zap**: [npub192jd2dxlqwfnemzz8hsk77z2rn4de3thelw6suvtvqsl79d0udysxzuswy]
+
+Thank you for your support! 🚀
+
+---
+
 **💡 Tip:** For getting started, we recommend the **NIP-17 mode** for private messages or **group mode** for community chats.
