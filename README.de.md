@@ -82,7 +82,11 @@ NOSTR_GROUP_RELAY=wss://groups.0xchat.com
 ### 2. Telegram-Gruppen-ID ermitteln
 ```bash
 # Token ersetzen und ausführen
+# Nur die Gruppen-ID anzeigen
 curl -s "https://api.telegram.org/bot<DEIN_BOT_TOKEN>/getUpdates" | jq '.result[].message.chat.id'
+
+# Gruppen-ID und Name anzeigen
+curl -s "https://api.telegram.org/bot<DEIN_BOT_TOKEN>/getUpdates" | jq '.result[].message.chat | {title, id}'
 ```
 
 ### 3. Nostr-Schlüssel generieren

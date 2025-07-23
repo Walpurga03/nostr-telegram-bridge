@@ -150,6 +150,9 @@ async fn handle_telegram_message(
 
         info!("Verarbeite Nachricht von: {}", sender_name);
 
+        // HIER Logging ergänzen:
+        info!("Nachricht von {}: {}", sender_name, text);
+
         // Telegram-Datum (Unix-Timestamp) in lesbares Format umwandeln
         let tz: Tz = env::var("TIMEZONE")
             .unwrap_or_else(|_| "Europe/Berlin".to_string())
