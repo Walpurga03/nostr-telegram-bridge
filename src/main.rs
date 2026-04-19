@@ -10,9 +10,13 @@ use log::{info, warn, error, debug};
 use chrono::{NaiveDateTime, TimeZone};
 use chrono_tz::Tz;
 use std::env;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 mod config;
 use crate::config::{Config, ConfigError, EncryptionType};
+
+mod database;
+use crate::database::{Database, MessageMapping, MessageDirection};
 
 #[derive(Error, Debug)]
 pub enum BridgeError {
@@ -93,7 +97,10 @@ async fn send_to_nostr(
             EventBuilder::text_note(public_text, Vec::new())
         },
         EncryptionType::Group => {
-            info!("Sende Gruppen-Nachricht...");
+            // NIP-29 Gruppen-Modus (Legacy-Unterstützung)
+            // Hinweis: Dieser Modus ist für Nostr-Gruppen gedacht, nicht für DM-Bridge
+            // Für DM-Bridge verwenden Sie EncryptionType::Nip04 oder Nip17
+            info!("Sende Gruppen-Nachricht (NIP-29)...");
             let group_event_id = EventId::from_hex(
                 config.get_group_event_id().ok_or_else(|| 
                     BridgeError::Config(ConfigError::InvalidValue {
@@ -134,12 +141,21 @@ async fn handle_telegram_message(
     config: Arc<Config>,
     keys: Arc<Keys>,
     recipient_pubkey: Option<PublicKey>,
+    db: Arc<Database>,
 ) -> Result<()> {
     debug!("Nachricht empfangen von Chat-ID: {}", message.chat.id.0);
 
     // Nur Nachrichten aus der gewünschten Gruppe weiterleiten
     if message.chat.id.0 != config.telegram_group_id {
         debug!("Nachricht ignoriert - falsche Gruppe");
+        return Ok(());
+    }
+
+    // Loop-Schutz: Prüfen ob Nachricht bereits verarbeitet wurde
+    let telegram_msg_id = message.id.0 as i64;
+    if db.telegram_message_exists(message.chat.id.0, telegram_msg_id)
+        .unwrap_or(false) {
+        debug!("Nachricht bereits verarbeitet (Loop-Schutz): {}", telegram_msg_id);
         return Ok(());
     }
 
@@ -193,8 +209,154 @@ async fn handle_telegram_message(
             }
         };
 
-        if let Err(e) = send_to_nostr(&client, &keys, recipient_pubkey.as_ref(), &formatted_message, &config).await {
-            error!("Fehler beim Senden an Nostr: {}", e);
+        match send_to_nostr(&client, &keys, recipient_pubkey.as_ref(), &formatted_message, &config).await {
+            Ok(event_id) => {
+                // Erfolgreich gesendet - in Datenbank speichern
+                let timestamp = SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap()
+                    .as_secs() as i64;
+
+                let recipient_pubkey_str = recipient_pubkey
+                    .map(|pk| pk.to_bech32().unwrap_or_else(|_| "unknown".to_string()))
+                    .unwrap_or_else(|| "public".to_string());
+
+                let mapping = MessageMapping {
+                    id: None,
+                    telegram_chat_id: message.chat.id.0,
+                    telegram_message_id: telegram_msg_id,
+                    nostr_event_id: event_id.to_hex(),
+                    nostr_recipient_pubkey: recipient_pubkey_str,
+                    direction: MessageDirection::TelegramToNostr,
+                    timestamp,
+                };
+
+                if let Err(e) = db.save_mapping(&mapping) {
+                    error!("Fehler beim Speichern des Mappings: {}", e);
+                } else {
+                    debug!("Mapping gespeichert: Telegram {} -> Nostr {}", telegram_msg_id, event_id);
+                }
+            }
+            Err(e) => {
+                error!("Fehler beim Senden an Nostr: {}", e);
+            }
+        }
+    }
+
+    Ok(())
+}
+
+/// Sendet eine Nachricht an Telegram
+async fn send_to_telegram(
+    bot: &Bot,
+    chat_id: i64,
+    text: &str,
+) -> std::result::Result<teloxide::types::Message, teloxide::RequestError> {
+    let msg = bot.send_message(ChatId(chat_id), text).await?;
+    Ok(msg)
+}
+
+/// Hört auf Nostr-Events und leitet sie an Telegram weiter
+async fn listen_nostr_events(
+    client: Arc<Client>,
+    keys: Arc<Keys>,
+    config: Arc<Config>,
+    bot: Bot,
+    db: Arc<Database>,
+    recipient_pubkey: Option<PublicKey>,
+) -> Result<()> {
+    info!("Starte Nostr-Event-Listener...");
+
+    // Nur für DM-Modi (NIP-04/NIP-17)
+    if !config.needs_encryption() {
+        info!("Nostr-Listener nur für DM-Modi aktiv");
+        return Ok(());
+    }
+
+    let recipient = match recipient_pubkey {
+        Some(pk) => pk,
+        None => {
+            warn!("Kein Empfänger-Pubkey konfiguriert, Nostr-Listener wird nicht gestartet");
+            return Ok(());
+        }
+    };
+
+    // Filter für DMs (Kind 4 = NIP-04 encrypted DMs)
+    let filter = Filter::new()
+        .kind(Kind::EncryptedDirectMessage)
+        .author(recipient) // Nur vom konfigurierten User
+        .since(Timestamp::now());
+
+    client.subscribe(vec![filter], None).await;
+    info!("Nostr-Subscription aktiv für DMs von {}", recipient.to_bech32().unwrap_or_default());
+
+    // Event-Stream verarbeiten
+    let mut notifications = client.notifications();
+    
+    while let Ok(notification) = notifications.recv().await {
+        if let RelayPoolNotification::Event { event, .. } = notification {
+            // Loop-Schutz: Prüfen ob Event bereits verarbeitet wurde
+            let event_id_hex = event.id.to_hex();
+            if db.nostr_event_exists(&event_id_hex).unwrap_or(false) {
+                debug!("Nostr-Event bereits verarbeitet (Loop-Schutz): {}", event_id_hex);
+                continue;
+            }
+
+            // Nur Events vom konfigurierten Empfänger
+            if event.pubkey != recipient {
+                debug!("Event von anderem Pubkey ignoriert: {}", event.pubkey);
+                continue;
+            }
+
+            // DM entschlüsseln
+            let secret_key = keys.secret_key().expect("Failed to get secret key");
+            match nip04::decrypt(secret_key, &recipient, &event.content) {
+                Ok(decrypted_content) => {
+                    info!("Nostr-DM empfangen von {}", recipient.to_bech32().unwrap_or_default());
+                    
+                    // Formatiere Nachricht für Telegram
+                    let formatted_message = format!(
+                        "📨 Nostr-DM\n👤 Von: {}\n\n{}",
+                        recipient.to_bech32().unwrap_or_else(|_| "unknown".to_string()),
+                        decrypted_content
+                    );
+
+                    // An Telegram senden
+                    match send_to_telegram(&bot, config.telegram_group_id, &formatted_message).await {
+                        Ok(telegram_msg) => {
+                            info!("Nachricht an Telegram gesendet");
+                            
+                            // In Datenbank speichern
+                            let timestamp = SystemTime::now()
+                                .duration_since(UNIX_EPOCH)
+                                .unwrap()
+                                .as_secs() as i64;
+
+                            let mapping = MessageMapping {
+                                id: None,
+                                telegram_chat_id: config.telegram_group_id,
+                                telegram_message_id: telegram_msg.id.0 as i64,
+                                nostr_event_id: event_id_hex.clone(),
+                                nostr_recipient_pubkey: recipient.to_bech32().unwrap_or_else(|_| "unknown".to_string()),
+                                direction: MessageDirection::NostrToTelegram,
+                                timestamp,
+                            };
+
+                            if let Err(e) = db.save_mapping(&mapping) {
+                                error!("Fehler beim Speichern des Mappings: {}", e);
+                            } else {
+                                debug!("Mapping gespeichert: Nostr {} -> Telegram {}", event_id_hex, telegram_msg.id.0);
+                            }
+                        }
+                        Err(e) => {
+                            error!("Fehler beim Senden an Telegram: {}", e);
+                        }
+                    }
+                }
+                Err(e) => {
+                    error!("Fehler beim Entschlüsseln der Nostr-DM: {}", e);
+                }
+            }
         }
     }
 
@@ -224,9 +386,9 @@ async fn main() -> Result<()> {
     
     // Empfänger-Pubkey nur für verschlüsselte Modi
     let recipient_pubkey = if config.needs_encryption() {
-        let pubkey_str = config.nostr_public_key.as_ref()
+        let pubkey_str = config.nostr_dm_recipient.as_ref()
             .ok_or_else(|| BridgeError::Config(ConfigError::InvalidValue {
-                var: "NOSTR_PUBLIC_KEY".to_string(),
+                var: "NOSTR_DM_RECIPIENT".to_string(),
                 msg: "Empfänger-Pubkey für verschlüsselte Modi erforderlich".to_string(),
             }))?;
         Some(PublicKey::from_bech32(pubkey_str)
@@ -236,6 +398,21 @@ async fn main() -> Result<()> {
     };
     
     let client = Arc::new(init_nostr_client(&keys, &config.nostr_relays, &config).await?);
+
+    // Datenbank initialisieren
+    let db = Arc::new(
+        Database::new(&config.database_path)
+            .map_err(|e| BridgeError::Config(ConfigError::InvalidValue {
+                var: "DATABASE_PATH".to_string(),
+                msg: format!("Fehler beim Öffnen der Datenbank: {}", e),
+            }))?
+    );
+    info!("📊 Datenbank initialisiert: {}", config.database_path);
+
+    // Statistiken anzeigen
+    if let Ok((total, t_to_n, n_to_t)) = db.get_stats() {
+        info!("📈 Datenbank-Statistiken: {} Nachrichten ({} T→N, {} N→T)", total, t_to_n, n_to_t);
+    }
 
     info!("🚀 Bridge läuft ({:?})", config.encryption_type);
     info!("📱 Telegram-Gruppe: {}", config.telegram_group_id);
@@ -254,8 +431,8 @@ async fn main() -> Result<()> {
             }
         },
         _ => {
-            if let Some(ref pubkey) = config.nostr_public_key {
-                info!("🔒 Nostr-Empfänger: {}", pubkey);
+            if let Some(ref pubkey) = config.nostr_dm_recipient {
+                info!("🔒 Nostr-DM-Empfänger: {}", pubkey);
             }
         }
     }
@@ -268,29 +445,64 @@ async fn main() -> Result<()> {
         info!("🛑 Shutdown-Signal erhalten, Bridge wird beendet...");
     };
 
-    // Telegram-Handler
-    let handler = teloxide::repl(bot, move |message: Message| {
-        let client = client.clone();
-        let config = config.clone();
-        let keys = keys.clone();
-        let recipient_pubkey = recipient_pubkey;
-        
-        async move {
-            if let Err(e) = handle_telegram_message(message, client, config, keys, recipient_pubkey).await {
-                error!("Fehler beim Verarbeiten der Nachricht: {}", e);
+    // Telegram-Handler (Task 1: Telegram → Nostr)
+    let telegram_bot = bot.clone();
+    let telegram_client = client.clone();
+    let telegram_config = config.clone();
+    let telegram_keys = keys.clone();
+    let telegram_db = db.clone();
+    let telegram_recipient = recipient_pubkey;
+    
+    let telegram_task = tokio::spawn(async move {
+        teloxide::repl(telegram_bot, move |message: Message| {
+            let client = telegram_client.clone();
+            let config = telegram_config.clone();
+            let keys = telegram_keys.clone();
+            let db = telegram_db.clone();
+            let recipient_pubkey = telegram_recipient;
+            
+            async move {
+                if let Err(e) = handle_telegram_message(message, client, config, keys, recipient_pubkey, db).await {
+                    error!("Fehler beim Verarbeiten der Telegram-Nachricht: {}", e);
+                }
+                Ok(())
             }
-            Ok(())
+        }).await;
+    });
+
+    // Nostr-Listener (Task 2: Nostr → Telegram)
+    let nostr_client = client.clone();
+    let nostr_keys = keys.clone();
+    let nostr_config = config.clone();
+    let nostr_bot = bot.clone();
+    let nostr_db = db.clone();
+    let nostr_recipient = recipient_pubkey;
+    
+    let nostr_task = tokio::spawn(async move {
+        if let Err(e) = listen_nostr_events(
+            nostr_client,
+            nostr_keys,
+            nostr_config,
+            nostr_bot,
+            nostr_db,
+            nostr_recipient,
+        ).await {
+            error!("Fehler im Nostr-Listener: {}", e);
         }
     });
 
-    // Entweder auf Shutdown-Signal oder Handler-Completion warten
+    // Auf Shutdown-Signal oder Task-Completion warten
     tokio::select! {
         _ = shutdown_signal => {
             info!("Bridge beendet.");
             Ok(())
         }
-        _ = handler => {
-            // Handler ist beendet (z.B. bei Fehler in teloxide)
+        _ = telegram_task => {
+            info!("Telegram-Task beendet");
+            Ok(())
+        }
+        _ = nostr_task => {
+            info!("Nostr-Task beendet");
             Ok(())
         }
     }

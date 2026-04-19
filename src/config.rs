@@ -42,8 +42,8 @@ pub struct Config {
     pub telegram_group_id: i64,
     /// Nostr Private Key (nsec...)
     pub nostr_private_key: String,
-    /// Nostr Empfänger-Pubkey (npub...) - Optional für public/group
-    pub nostr_public_key: Option<String>,
+    /// Nostr DM-Empfänger-Pubkey (npub...) - Für DM-Modi (nip04/nip17)
+    pub nostr_dm_recipient: Option<String>,
     /// Liste von Nostr-Relays
     pub nostr_relays: Vec<String>,
     /// Verschlüsselungstyp
@@ -52,6 +52,8 @@ pub struct Config {
     pub nostr_group_event_id: Option<String>,
     /// Nostr Gruppen-Relay (für group-Modus)
     pub nostr_group_relay: Option<String>,
+    /// Pfad zur SQLite-Datenbank
+    pub database_path: String,
 }
 
 impl Config {
@@ -66,20 +68,38 @@ impl Config {
             })?;
         let nostr_private_key = get_env_var("NOSTR_PRIVATE_KEY")?;
         
-        // Encryption type mit Default auf nip17
+        // Encryption type mit Default auf nip04 (NIP-17 noch nicht vollständig implementiert)
         let encryption_type_str = env::var("ENCRYPTION_TYPE")
-            .unwrap_or_else(|_| "nip17".to_string());
+            .unwrap_or_else(|_| "nip04".to_string());
         let encryption_type = EncryptionType::from_str(&encryption_type_str)?;
 
-        // Nostr Public Key nur für verschlüsselte Modi erforderlich
-        let nostr_public_key = match encryption_type {
+        // Nostr DM-Empfänger nur für DM-Modi erforderlich
+        // Fallback: NOSTR_PUBLIC_KEY für Rückwärtskompatibilität
+        let nostr_dm_recipient = match encryption_type {
             EncryptionType::Nip04 | EncryptionType::Nip17 => {
-                Some(get_env_var("NOSTR_PUBLIC_KEY")?)
+                // Versuche zuerst NOSTR_DM_RECIPIENT, dann NOSTR_PUBLIC_KEY (Fallback)
+                env::var("NOSTR_DM_RECIPIENT")
+                    .or_else(|_| env::var("NOSTR_PUBLIC_KEY"))
+                    .ok()
+                    .or_else(|| {
+                        // Wenn keines gesetzt ist, Fehler
+                        None
+                    })
             }
             EncryptionType::Public | EncryptionType::Group => {
-                env::var("NOSTR_PUBLIC_KEY").ok()
+                env::var("NOSTR_DM_RECIPIENT")
+                    .or_else(|_| env::var("NOSTR_PUBLIC_KEY"))
+                    .ok()
             }
         };
+
+        // Validierung: DM-Modi benötigen Empfänger
+        if matches!(encryption_type, EncryptionType::Nip04 | EncryptionType::Nip17)
+            && nostr_dm_recipient.is_none() {
+            return Err(ConfigError::MissingEnvVar(
+                "NOSTR_DM_RECIPIENT oder NOSTR_PUBLIC_KEY".to_string()
+            ));
+        }
 
         let nostr_relays: Vec<String> = get_env_var("NOSTR_RELAYS")?
             .split(',')
@@ -89,6 +109,10 @@ impl Config {
         // Gruppenoptionen (optional)
         let nostr_group_event_id = env::var("NOSTR_GROUP_EVENT_ID").ok();
         let nostr_group_relay = env::var("NOSTR_GROUP_RELAY").ok();
+
+        // Datenbank-Pfad (mit Default)
+        let database_path = env::var("DATABASE_PATH")
+            .unwrap_or_else(|_| "./bridge.db".to_string());
 
         // Validierung
         if nostr_relays.is_empty() {
@@ -118,11 +142,12 @@ impl Config {
             telegram_bot_token,
             telegram_group_id,
             nostr_private_key,
-            nostr_public_key,
+            nostr_dm_recipient,
             nostr_relays,
             encryption_type,
             nostr_group_event_id,
             nostr_group_relay,
+            database_path,
         })
     }
 

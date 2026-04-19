@@ -1,29 +1,44 @@
 [🇬🇧 English](README.md)
 # nostr-telegram-bridge
 
-Eine Bridge-Anwendung, die Nachrichten aus einer Telegram-Gruppe als Nostr-Nachrichten weiterleitet. Unterstützt NIP-04, NIP-17, öffentliche Nachrichten und Nostr-Gruppen (NIP-29).
+Eine **bidirektionale** Bridge-Anwendung, die Nachrichten zwischen einer Telegram-Gruppe und einem Nostr-User über DMs weiterleitet. Unterstützt NIP-04 verschlüsselte Direktnachrichten mit Persistenz und Loop-Schutz.
 
-## Features
+## ✨ Features
 
-- 📱 Telegram-Gruppe → Nostr Weiterleitung
-- 🔒 **NIP-17** (Private Messages) – Standard
-- 🔐 **NIP-04** (Legacy Encryption) – Kompatibilität
-- 🌐 **Öffentliche Nachrichten** – Keine Verschlüsselung
-- 👥 **Nostr-Gruppen (NIP-29)** – Gruppen-Chat
-- 🔄 Multi-Relay-Support
-- 🛑 Graceful Shutdown
-- ⚙️ Konfiguration über `.env`
+- 🔄 **Bidirektional**: Telegram-Gruppe ↔ Nostr-User-DMs
+- 🔒 **NIP-04** verschlüsselte Direktnachrichten (Standard)
+- 📊 **SQLite-Persistenz**: Nachrichten-Mapping und Deduplizierung
+- 🛡️ **Loop-Schutz**: Verhindert Nachrichten-Schleifen
+- 🔄 **Multi-Relay-Support**
+- 🛑 **Graceful Shutdown**
+- ⚙️ **Konfiguration über `.env`**
+- 👥 **Legacy-Support**: NIP-29-Gruppen (optional)
 
-## Voraussetzungen
+## 🎯 Architektur
+
+```
+Telegram-Gruppe  ←→  Bridge  ←→  Nostr-User (DMs)
+                       ↓
+                   SQLite-DB
+               (Nachrichten-Mapping)
+```
+
+**Wichtige Änderungen zur vorherigen Version:**
+- ✅ Jetzt **bidirektional** (Telegram ↔ Nostr)
+- ✅ **Persistentes Nachrichten-Mapping** (SQLite)
+- ✅ **Loop-Schutz** und Deduplizierung
+- ✅ Fokus auf **DM-basierte Kommunikation** (nicht Gruppen)
+- ⚠️ NIP-17-Unterstützung geplant (aktuell NIP-04)
+
+## 📋 Voraussetzungen
 
 - Rust 1.70+
 - Telegram Bot Token
-- Nostr-Schlüssel (Private Key)
-- Nostr Public Key (nur für verschlüsselte Nachrichten)
+- Nostr Private Key
+- Nostr Empfänger Public Key (für DM-Modus)
 - Telegram-Gruppen-ID
-- **Für Gruppen-Modus**: Nostr-Gruppen-Event-ID und Gruppen-Relay
 
-## Installation
+## 🚀 Installation
 
 ```bash
 git clone https://github.com/Walpurga03/nostr-telegram-bridge.git
@@ -32,15 +47,16 @@ cargo build --release
 cp .env.example .env
 ```
 
-## Schnellstart
+## ⚡ Schnellstart
 
 1. `.env` konfigurieren (siehe unten)
 2. Bridge starten: `cargo run`
-3. Telegram-Nachricht senden → Erscheint in Nostr
+3. Nachricht in Telegram-Gruppe senden → Erscheint als Nostr-DM
+4. DM von Nostr senden → Erscheint in Telegram-Gruppe
 
-## Konfiguration
+## ⚙️ Konfiguration
 
-Erstelle eine `.env`-Datei:
+Beispiel `.env`:
 
 ```env
 # Telegram-Konfiguration
@@ -49,29 +65,30 @@ TELEGRAM_GROUP_ID=-1001XXXXXXXXXXXXx
 
 # Nostr-Konfiguration
 NOSTR_PRIVATE_KEY=nsec1abcdef...
-NOSTR_PUBLIC_KEY=npub1abcdef...  # Nur für nip04/nip17
+NOSTR_DM_RECIPIENT=npub1abcdef...  # Der Nostr-User für die Kommunikation
 
 # Relay-Konfiguration
 NOSTR_RELAYS=wss://relay.damus.io,wss://nos.lol,wss://relay.snort.social
 
-# Verschlüsselungstyp
-ENCRYPTION_TYPE=nip17
+# Verschlüsselungstyp (nip04 für DM-Bridge)
+ENCRYPTION_TYPE=nip04
 
-# Gruppen-Konfiguration (nur für ENCRYPTION_TYPE=group)
-NOSTR_GROUP_EVENT_ID=dde39dbaf95c637ea8XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
-NOSTR_GROUP_RELAY=wss://groups.0xchat.com
+# Datenbank-Pfad (optional, Standard: ./bridge.db)
+DATABASE_PATH=./bridge.db
 ```
 
-## Verschlüsselungstypen
+## 🔐 Verschlüsselungstypen
 
-| Typ      | Beschreibung                           | Empfänger nötig | Spezielle Config     |
-|----------|----------------------------------------|-----------------|----------------------|
-| `nip17`  | Moderne private Nachrichten (Standard) | ✅              | ❌                   |
-| `nip04`  | Legacy-Verschlüsselung (Kompatibilität)| ✅              | ❌                   |
-| `public` | Öffentliche Nachrichten                | ❌              | ❌                   |
-| `group`  | Nostr-Gruppen (NIP-29)                 | ❌              | ✅ Event-ID + Relay  |
+| Typ      | Beschreibung                           | Anwendungsfall              | Status      |
+|----------|----------------------------------------|-----------------------------|-------------|
+| `nip04`  | Verschlüsselte DMs (NIP-04)            | **DM-Bridge** (empfohlen)   | ✅ Aktiv    |
+| `nip17`  | Moderne private Nachrichten (NIP-17)   | Zukünftige DM-Bridge        | 🚧 Geplant  |
+| `group`  | Nostr-Gruppen (NIP-29)                 | Legacy-Gruppen-Support      | ⚠️ Legacy   |
+| `public` | Öffentliche Nachrichten                | Nur zum Testen              | ⚠️ Legacy   |
 
-## Setup-Schritte
+**Empfehlung**: Verwende `nip04` für die DM-Bridge. NIP-17-Unterstützung ist für zukünftige Versionen geplant.
+
+## 📖 Setup-Schritte
 
 ### 1. Telegram Bot erstellen
 1. Sende `/newbot` an [@BotFather](https://t.me/BotFather)
@@ -82,29 +99,19 @@ NOSTR_GROUP_RELAY=wss://groups.0xchat.com
 ### 2. Telegram-Gruppen-ID ermitteln
 ```bash
 # Token ersetzen und ausführen
-# Nur die Gruppen-ID anzeigen
 curl -s "https://api.telegram.org/bot<DEIN_BOT_TOKEN>/getUpdates" | jq '.result[].message.chat.id'
-
-# Gruppen-ID und Name anzeigen
-curl -s "https://api.telegram.org/bot<DEIN_BOT_TOKEN>/getUpdates" | jq '.result[].message.chat | {title, id}'
 ```
 
 ### 3. Nostr-Schlüssel generieren
-- **Online**: [nostrtool.com](https://nostrtool.com) 
+- **Online**: [nostrtool.com](https://nostrtool.com)
 - **CLI**: `nostr-cli` Tool verwenden
 
-### 4. Für Gruppen-Modus: Nostr-Gruppe einrichten
-- **Option A**: Bestehende Gruppe verwenden (z.B. über [0xchat](https://0xchat.com))
-- **Option B**: Neue Gruppe erstellen
+### 4. Nostr-Empfänger Public Key ermitteln
+- Der `npub1...` des Nostr-Users, mit dem du kommunizieren möchtest
+- Dieser User erhält DMs von der Telegram-Gruppe
+- Seine DMs werden in die Telegram-Gruppe weitergeleitet
 
-#### Gruppen-Event-ID finden
-```bash
-# In 0xchat: Gruppen-Info → Event-ID kopieren
-# Format: 64 Zeichen Hex-String
-# Beispiel: dde39dbaf95c637ea8785583e4c1a64be0462f3609695592c433ee6697b19815
-```
-
-## Verwendung
+## 🎮 Verwendung
 
 ```bash
 # Entwicklung
@@ -118,19 +125,52 @@ RUST_LOG=debug cargo run
 ```
 
 ### Nachrichtenfluss
-1. **Telegram**: Nachricht in konfigurierte Gruppe senden
-2. **Bridge**: Empfängt und formatiert Nachricht
-3. **Nostr**: Nachricht wird entsprechend `ENCRYPTION_TYPE` weitergeleitet
 
-## Sicherheit
+**Telegram → Nostr:**
+1. User sendet Nachricht in Telegram-Gruppe
+2. Bridge empfängt und prüft auf Duplikate
+3. Bridge sendet verschlüsselte DM an Nostr-Empfänger
+4. Mapping wird in Datenbank gespeichert
+
+**Nostr → Telegram:**
+1. Nostr-User sendet DM an Bridge
+2. Bridge empfängt und entschlüsselt Nachricht
+3. Bridge prüft auf Duplikate
+4. Bridge sendet Nachricht in Telegram-Gruppe
+5. Mapping wird in Datenbank gespeichert
+
+## 🗄️ Datenbank
+
+Die Bridge verwendet SQLite zum Speichern von Nachrichten-Mappings:
+
+```sql
+message_mapping:
+- telegram_chat_id
+- telegram_message_id
+- nostr_event_id
+- nostr_recipient_pubkey
+- direction (telegram_to_nostr / nostr_to_telegram)
+- timestamp
+```
+
+**Vorteile:**
+- ✅ Loop-Schutz (verhindert doppelte Verarbeitung)
+- ✅ Nachrichten-Tracking
+- ✅ Reply-Support (geplant)
+- ✅ Statistiken
+
+**Speicherort**: `./bridge.db` (konfigurierbar über `DATABASE_PATH`)
+
+## 🔒 Sicherheit
 
 - ❌ **Niemals** Private Keys oder Bot Token in Git committen
 - 🔒 `.env`-Datei absichern: `chmod 600 .env`
-- 🛡️ **NIP-17 verwenden** für beste Sicherheit
+- 🛡️ **NIP-04 verwenden** für verschlüsselte DMs (NIP-17 kommt bald)
 - 🔑 **Separate Schlüssel** für Development/Production
 - 👥 **Gruppen-Berechtigung** prüfen
+- 📊 Datenbank regelmäßig sichern
 
-## Fehlerbehandlung
+## 🐛 Fehlerbehandlung
 
 ### Häufige Probleme
 
@@ -142,57 +182,56 @@ TELEGRAM_GROUP_ID=1234567890      # ❌ Falsch (positiv)
 
 **❌ Nostr-Keys Format**
 ```bash
-NOSTR_PRIVATE_KEY=nsec1...  # ✅ Korrekt (nsec1 Präfix)
-NOSTR_PUBLIC_KEY=npub1...   # ✅ Korrekt (npub1 Präfix)
+NOSTR_PRIVATE_KEY=nsec1...     # ✅ Korrekt (nsec1 Präfix)
+NOSTR_DM_RECIPIENT=npub1...    # ✅ Korrekt (npub1 Präfix)
 ```
 
-**❌ Gruppen-Berechtigung**
+**❌ Datenbank gesperrt**
 ```bash
-# Bot ist nicht in der Nostr-Gruppe berechtigt
-# Lösung: Gruppen-Admin muss Bot-Berechtigung erteilen
+# Bei "database is locked" Fehlern:
+# 1. Alle Bridge-Instanzen stoppen
+# 2. bridge.db löschen
+# 3. Bridge neu starten
 ```
 
-**❌ Relay-Verbindung**
+**❌ Nachrichten werden nicht weitergeleitet**
 ```bash
-# Gruppen-Relay testen
-curl -I wss://groups.0xchat.com
-# Sollte "101 Switching Protocols" zurückgeben
+# Logs prüfen:
+RUST_LOG=debug cargo run
+
+# Überprüfen:
+# 1. Bot hat Leserechte in Telegram-Gruppe
+# 2. Nostr-Relays sind erreichbar
+# 3. Empfänger-Pubkey ist korrekt
+# 4. Datenbank ist beschreibbar
 ```
 
-## Vergleich der Verschlüsselungstypen
+## 🔄 Migration von vorheriger Version
 
-### 🔒 NIP-17 (Empfohlen)
-- ✅ Moderne Kryptografie
-- ✅ Bessere Metadaten-Verschleierung
-- ✅ Schutz vor Timing-Angriffen
-- ✅ Zukunftssicher
-- ⚠️ Neuere Clients erforderlich
+Wenn du von der gruppenbasierten Version upgraden möchtest:
 
-### 🔐 NIP-04 (Legacy)
-- ✅ Maximale Client-Kompatibilität
-- ✅ Bewährte Technologie
-- ⚠️ Ältere Kryptografie
-- ⚠️ Metadaten-Leaks möglich
+1. **`.env` sichern**
+2. **`.env` aktualisieren**:
+   - `NOSTR_PUBLIC_KEY` → `NOSTR_DM_RECIPIENT` umbenennen
+   - `ENCRYPTION_TYPE=nip17` → `ENCRYPTION_TYPE=nip04` ändern
+   - `DATABASE_PATH=./bridge.db` hinzufügen (optional)
+3. **Gruppen-spezifische Einstellungen entfernen** (außer du brauchst Legacy-Gruppen-Support)
+4. **Bridge neu starten**
 
-### 🌐 Öffentlich
-- ✅ Keine Verschlüsselung nötig
-- ✅ Maximale Kompatibilität
-- ✅ Einfache Einrichtung
-- ⚠️ Jeder kann mitlesen
+## 🚧 Roadmap
 
-### 👥 Gruppen (NIP-29)
-- ✅ Gruppen-Chat-Funktionalität
-- ✅ Keine Empfänger-Konfiguration nötig
-- ✅ Skalierbar für viele Nutzer
-- ✅ Moderierbar durch Admins
-- ⚠️ Gruppen-Setup erforderlich
-- ⚠️ NIP-29 Client-Support nötig
+- [ ] **NIP-17-Unterstützung** (moderne verschlüsselte DMs)
+- [ ] **Reply-Support** (Telegram ↔ Nostr)
+- [ ] **Medien-Support** (Bilder, Dateien)
+- [ ] **Multi-User-Support** (mehrere Nostr-Empfänger)
+- [ ] **Web-UI** für Konfiguration
+- [ ] **Docker-Support**
 
-## Lizenz
+## 📝 Lizenz
 
 MIT – Siehe [LICENSE](LICENSE)
 
-## Support
+## 💬 Support
 
 - 🐛 **Issues**: [GitHub Issues](https://github.com/Walpurga03/nostr-telegram-bridge/issues)
 - 🐾 **Nostr**: `npub192jd2dxlqwfnemzz8hsk77z2rn4de3thelw6suvtvqsl79d0udysxzuswy`
@@ -210,4 +249,4 @@ Danke für deine Unterstützung! 🚀
 
 ---
 
-**💡 Tipp**: Für den Einstieg empfehlen wir den **NIP-17 Modus** für private Nachrichten oder **Gruppen-Modus** für Community-Chats.
+**💡 Tipp**: Diese Bridge ist für **Eins-zu-Eins-Kommunikation** zwischen einer Telegram-Gruppe und einem einzelnen Nostr-User über DMs konzipiert. Für Gruppen-zu-Gruppen-Kommunikation verwende den Legacy-Modus `ENCRYPTION_TYPE=group`.

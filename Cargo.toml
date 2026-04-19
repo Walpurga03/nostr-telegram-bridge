@@ -19,3 +19,5 @@ log = "0.4"
 env_logger = "0.10"
 chrono = "0.4"
 chrono-tz = "0.8"
+rusqlite = { version = "0.31", features = ["bundled"] }
+hex = "0.4"
