@@ -291,16 +291,18 @@ async fn listen_nostr_events(
     let bridge_pubkey = keys.public_key();
     
     // Filter: ALLE DMs VON unserem User (egal an wen)
+    // WICHTIG: Ohne .since() um auch ältere Events zu empfangen (für Tests)
     let filter = Filter::new()
         .kind(Kind::EncryptedDirectMessage)
         .author(recipient) // DMs VON npub1hht9...
-        .since(Timestamp::now());
+        .limit(10); // Nur die letzten 10 Events zum Testen
 
-    info!("Subscribing mit VEREINFACHTEM Filter:");
+    info!("Subscribing mit TEST-Filter:");
     info!("  - Kind: EncryptedDirectMessage (4)");
     info!("  - Author (sender): {}", recipient.to_bech32().unwrap_or_default());
     info!("  - Pubkey filter: DEAKTIVIERT (empfange alle DMs vom User)");
-    info!("  - Since: now");
+    info!("  - Since: DEAKTIVIERT (empfange auch ältere Events)");
+    info!("  - Limit: 10 (zum Testen)");
 
     let subscription_id = client.subscribe(vec![filter.clone()], None).await;
     info!("Nostr-Subscription aktiv mit ID: {:?}", subscription_id);
