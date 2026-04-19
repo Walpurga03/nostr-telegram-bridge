@@ -1,12 +1,12 @@
-[🇬🇧 English](README.md)
 # nostr-telegram-bridge
 
-Eine **bidirektionale** Bridge-Anwendung, die Nachrichten zwischen einer Telegram-Gruppe und einem Nostr-User über DMs weiterleitet. Unterstützt NIP-04 verschlüsselte Direktnachrichten mit Persistenz und Loop-Schutz.
+Eine Bridge-Anwendung für **wechselseitige Kommunikation** zwischen einer Telegram-Gruppe und einem Nostr-User über DMs. Unterstützt **NIP-17 Gift Wrap** (empfohlen) und NIP-04 verschlüsselte Direktnachrichten mit Persistenz und Loop-Schutz.
 
 ## ✨ Features
 
-- 🔄 **Bidirektional**: Telegram-Gruppe ↔ Nostr-User-DMs
-- 🔒 **NIP-04** verschlüsselte Direktnachrichten (Standard)
+- 🔄 **Wechselseitige Kommunikation**: Telegram-Gruppe ↔ Nostr-User-DMs
+- 🔒 **NIP-17 Gift Wrap**: Moderne verschlüsselte DMs mit maximaler Privatsphäre
+- 👤 **Profilnamen-Anzeige**: Zeigt Nostr-Profilnamen statt nur npub
 - 📊 **SQLite-Persistenz**: Nachrichten-Mapping und Deduplizierung
 - 🛡️ **Loop-Schutz**: Verhindert Nachrichten-Schleifen
 - 🔄 **Multi-Relay-Support**
@@ -23,12 +23,12 @@ Telegram-Gruppe  ←→  Bridge  ←→  Nostr-User (DMs)
                (Nachrichten-Mapping)
 ```
 
-**Wichtige Änderungen zur vorherigen Version:**
-- ✅ Jetzt **bidirektional** (Telegram ↔ Nostr)
+**Wichtige Features:**
+- ✅ **Wechselseitige Kommunikation** (Telegram ↔ Nostr)
+- ✅ **NIP-17 Gift Wrap Support** (moderne verschlüsselte DMs)
 - ✅ **Persistentes Nachrichten-Mapping** (SQLite)
 - ✅ **Loop-Schutz** und Deduplizierung
-- ✅ Fokus auf **DM-basierte Kommunikation** (nicht Gruppen)
-- ⚠️ NIP-17-Unterstützung geplant (aktuell NIP-04)
+- ✅ **Profilnamen-Anzeige** (holt Namen aus Nostr-Profil)
 
 ## 📋 Voraussetzungen
 
@@ -52,7 +52,7 @@ cp .env.example .env
 1. `.env` konfigurieren (siehe unten)
 2. Bridge starten: `cargo run`
 3. Nachricht in Telegram-Gruppe senden → Erscheint als Nostr-DM
-4. DM von Nostr senden → Erscheint in Telegram-Gruppe
+4. DM von Nostr senden → Erscheint in Telegram-Gruppe mit Profilnamen
 
 ## ⚙️ Konfiguration
 
@@ -70,23 +70,31 @@ NOSTR_DM_RECIPIENT=npub1abcdef...  # Der Nostr-User für die Kommunikation
 # Relay-Konfiguration
 NOSTR_RELAYS=wss://relay.damus.io,wss://nos.lol,wss://relay.snort.social
 
-# Verschlüsselungstyp (nip04 für DM-Bridge)
-ENCRYPTION_TYPE=nip04
+# Verschlüsselungstyp
+ENCRYPTION_TYPE=nip17
 
 # Datenbank-Pfad (optional, Standard: ./bridge.db)
 DATABASE_PATH=./bridge.db
 ```
 
-## 🔐 Verschlüsselungstypen
+## 🔐 NIP-17 Gift Wrap Verschlüsselung
 
-| Typ      | Beschreibung                           | Anwendungsfall              | Status      |
-|----------|----------------------------------------|-----------------------------|-------------|
-| `nip04`  | Verschlüsselte DMs (NIP-04)            | **DM-Bridge** (empfohlen)   | ✅ Aktiv    |
-| `nip17`  | Moderne private Nachrichten (NIP-17)   | Zukünftige DM-Bridge        | 🚧 Geplant  |
-| `group`  | Nostr-Gruppen (NIP-29)                 | Legacy-Gruppen-Support      | ⚠️ Legacy   |
-| `public` | Öffentliche Nachrichten                | Nur zum Testen              | ⚠️ Legacy   |
+Die Bridge verwendet **NIP-17 Gift Wrap** für maximale Privatsphäre:
 
-**Empfehlung**: Verwende `nip04` für die DM-Bridge. NIP-17-Unterstützung ist für zukünftige Versionen geplant.
+**Vorteile von NIP-17:**
+- 🔒 **Maximale Privatsphäre**: Versteckt Metadaten (Sender, Empfänger, Zeitstempel)
+- 🎁 **3-stufige Verschlüsselung**: Gift Wrap → Seal → Rumor
+- 🔐 **nip44 Verschlüsselung**: Moderne, sichere Verschlüsselung
+- 📱 **Moderne Clients**: Kompatibel mit 0xchat, Amethyst, und anderen aktuellen Nostr-Apps
+
+**Wie funktioniert NIP-17?**
+1. **Gift Wrap (Kind 1059)**: Äußere Verschlüsselung versteckt alle Metadaten
+2. **Seal Event (Kind 13)**: Mittlere Schicht mit Sender-Informationen
+3. **Rumor**: Eigentliche Nachricht (ungesigntes Event)
+
+```
+Nachricht → Rumor → Seal (nip44) → Gift Wrap (nip44) → Relay
+```
 
 ## 📖 Setup-Schritte
 
@@ -129,35 +137,59 @@ RUST_LOG=debug cargo run
 **Telegram → Nostr:**
 1. User sendet Nachricht in Telegram-Gruppe
 2. Bridge empfängt und prüft auf Duplikate
-3. Bridge sendet verschlüsselte DM an Nostr-Empfänger
+3. Bridge sendet verschlüsselte NIP-17 Gift Wrap DM an Nostr-Empfänger
 4. Mapping wird in Datenbank gespeichert
 
 **Nostr → Telegram:**
-1. Nostr-User sendet DM an Bridge
-2. Bridge empfängt und entschlüsselt Nachricht
-3. Bridge prüft auf Duplikate
-4. Bridge sendet Nachricht in Telegram-Gruppe
-5. Mapping wird in Datenbank gespeichert
+1. Nostr-User sendet NIP-17 DM an Bridge
+2. Bridge empfängt und entschlüsselt Nachricht (Gift Wrap → Seal → Rumor)
+3. Bridge holt Profilnamen des Absenders (display_name oder name)
+4. Bridge prüft auf Duplikate
+5. Bridge sendet Nachricht in Telegram-Gruppe mit Format:
+   ```
+   📨 Nostr-DM
+   👤 Von: Max Mustermann (npub1...)
+   
+   Nachrichteninhalt
+   ```
+6. Mapping wird in Datenbank gespeichert
 
 ## 🗄️ Datenbank
 
-Die Bridge verwendet SQLite zum Speichern von Nachrichten-Mappings:
+Die Bridge verwendet SQLite zum Speichern von Nachrichten-Mappings.
+
+### Warum ist eine Datenbank notwendig?
+
+**Problem ohne Datenbank:**
+- 🔄 **Nachrichten-Schleifen**: Eine Nachricht von Telegram → Nostr würde wieder zurück zu Telegram → Nostr → ... (Endlosschleife!)
+- 📨 **Doppelte Nachrichten**: Beim Neustart würden alte Nachrichten erneut verarbeitet
+- 🔍 **Keine Nachverfolgung**: Unmöglich zu wissen, welche Telegram-Nachricht zu welchem Nostr-Event gehört
+
+**Lösung mit Datenbank:**
+Die Bridge speichert jede weitergeleitete Nachricht mit ihrer ID:
 
 ```sql
 message_mapping:
-- telegram_chat_id
-- telegram_message_id
-- nostr_event_id
-- nostr_recipient_pubkey
-- direction (telegram_to_nostr / nostr_to_telegram)
-- timestamp
+- telegram_chat_id          # Telegram-Gruppen-ID
+- telegram_message_id        # Eindeutige Telegram-Nachrichten-ID
+- nostr_event_id            # Eindeutige Nostr-Event-ID
+- nostr_recipient_pubkey    # Empfänger auf Nostr
+- direction                 # telegram_to_nostr oder nostr_to_telegram
+- timestamp                 # Zeitstempel der Weiterleitung
 ```
 
-**Vorteile:**
-- ✅ Loop-Schutz (verhindert doppelte Verarbeitung)
-- ✅ Nachrichten-Tracking
-- ✅ Reply-Support (geplant)
-- ✅ Statistiken
+**Konkrete Vorteile:**
+- ✅ **Loop-Schutz**: Bevor eine Nachricht weitergeleitet wird, prüft die Bridge: "Habe ich diese Nachricht schon verarbeitet?" → Wenn ja, wird sie ignoriert
+- ✅ **Duplikat-Vermeidung**: Beim Neustart werden alte Nachrichten nicht erneut gesendet
+- ✅ **Nachrichten-Tracking**: Du kannst sehen, welche Telegram-Nachricht zu welchem Nostr-Event gehört
+- ✅ **Reply-Support** (geplant): Antworten auf Nachrichten können korrekt zugeordnet werden
+- ✅ **Statistiken**: Anzahl der weitergeleiteten Nachrichten pro Richtung
+
+**Beispiel-Szenario:**
+1. User sendet "Hallo" in Telegram → Bridge leitet zu Nostr weiter → Speichert Mapping in DB
+2. Nostr-Relay sendet Event zurück an Bridge (normale Relay-Funktion)
+3. Bridge prüft DB: "Habe ich dieses Event schon verarbeitet?" → Ja! → Ignoriert es
+4. ✅ Keine Schleife!
 
 **Speicherort**: `./bridge.db` (konfigurierbar über `DATABASE_PATH`)
 
@@ -165,7 +197,7 @@ message_mapping:
 
 - ❌ **Niemals** Private Keys oder Bot Token in Git committen
 - 🔒 `.env`-Datei absichern: `chmod 600 .env`
-- 🛡️ **NIP-04 verwenden** für verschlüsselte DMs (NIP-17 kommt bald)
+- 🛡️ **NIP-17 verwenden** für beste Privatsphäre
 - 🔑 **Separate Schlüssel** für Development/Production
 - 👥 **Gruppen-Berechtigung** prüfen
 - 📊 Datenbank regelmäßig sichern
@@ -186,6 +218,14 @@ NOSTR_PRIVATE_KEY=nsec1...     # ✅ Korrekt (nsec1 Präfix)
 NOSTR_DM_RECIPIENT=npub1...    # ✅ Korrekt (npub1 Präfix)
 ```
 
+**❌ Verschlüsselungsfehler**
+```bash
+# Stelle sicher, dass ENCRYPTION_TYPE auf nip17 gesetzt ist:
+ENCRYPTION_TYPE=nip17  # ✅ Korrekt
+
+# Dein Nostr-Client muss NIP-17 unterstützen (0xchat, Amethyst, etc.)
+```
+
 **❌ Datenbank gesperrt**
 ```bash
 # Bei "database is locked" Fehlern:
@@ -203,7 +243,8 @@ RUST_LOG=debug cargo run
 # 1. Bot hat Leserechte in Telegram-Gruppe
 # 2. Nostr-Relays sind erreichbar
 # 3. Empfänger-Pubkey ist korrekt
-# 4. Datenbank ist beschreibbar
+# 4. ENCRYPTION_TYPE passt zu deinem Client
+# 5. Datenbank ist beschreibbar
 ```
 
 ## 🔄 Migration von vorheriger Version
@@ -213,14 +254,15 @@ Wenn du von der gruppenbasierten Version upgraden möchtest:
 1. **`.env` sichern**
 2. **`.env` aktualisieren**:
    - `NOSTR_PUBLIC_KEY` → `NOSTR_DM_RECIPIENT` umbenennen
-   - `ENCRYPTION_TYPE=nip17` → `ENCRYPTION_TYPE=nip04` ändern
+   - `ENCRYPTION_TYPE=nip17` setzen
    - `DATABASE_PATH=./bridge.db` hinzufügen (optional)
 3. **Gruppen-spezifische Einstellungen entfernen** (außer du brauchst Legacy-Gruppen-Support)
 4. **Bridge neu starten**
 
 ## 🚧 Roadmap
 
-- [ ] **NIP-17-Unterstützung** (moderne verschlüsselte DMs)
+- [x] **NIP-17-Unterstützung** (moderne verschlüsselte DMs) ✅
+- [x] **Profilnamen-Anzeige** (display_name aus Nostr-Profil) ✅
 - [ ] **Reply-Support** (Telegram ↔ Nostr)
 - [ ] **Medien-Support** (Bilder, Dateien)
 - [ ] **Multi-User-Support** (mehrere Nostr-Empfänger)
@@ -248,5 +290,28 @@ Wenn dir das Projekt gefällt und du Danke sagen möchtest, unterstütze die Ent
 Danke für deine Unterstützung! 🚀
 
 ---
+
+## 🔧 Technische Details
+
+### NIP-17 Gift Wrap Implementierung
+
+Die Bridge implementiert vollständige NIP-17 Unterstützung mit 3-stufiger Entschlüsselung:
+
+1. **Gift Wrap (Kind 1059)**: Äußere Verschlüsselung mit nip44
+2. **Seal Event (Kind 13)**: Mittlere Schicht mit Sender-Informationen
+3. **Rumor**: Eigentliche Nachricht (ungesigntes Event)
+
+```rust
+// Vereinfachter Ablauf:
+Gift Wrap (nip44) → Seal Event → Seal (nip44) → Rumor → Content
+```
+
+### Profilnamen-Abruf
+
+Die Bridge holt automatisch Profilnamen aus Nostr-Metadaten (Kind 0):
+- Versucht zuerst `display_name`
+- Falls nicht vorhanden, verwendet `name`
+- Fallback: npub1... (wenn kein Profil gefunden)
+- Timeout: 3 Sekunden
 
 **💡 Tipp**: Diese Bridge ist für **Eins-zu-Eins-Kommunikation** zwischen einer Telegram-Gruppe und einem einzelnen Nostr-User über DMs konzipiert. Für Gruppen-zu-Gruppen-Kommunikation verwende den Legacy-Modus `ENCRYPTION_TYPE=group`.

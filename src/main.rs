@@ -262,6 +262,42 @@ async fn send_to_telegram(
     Ok(msg)
 }
 
+// Hilfsfunktion: Hole Profil-Name von Nostr (NIP-01 Metadata)
+async fn get_nostr_display_name(client: &Client, pubkey: &PublicKey) -> String {
+    // Versuche Metadata vom Relay zu holen
+    let filter = Filter::new()
+        .kind(Kind::Metadata)
+        .author(*pubkey)
+        .limit(1);
+    
+    match client.get_events_of(vec![filter], Some(std::time::Duration::from_secs(3))).await {
+        Ok(events) => {
+            if let Some(event) = events.first() {
+                // Parse Metadata JSON
+                if let Ok(metadata) = serde_json::from_str::<serde_json::Value>(&event.content) {
+                    // Versuche verschiedene Name-Felder
+                    if let Some(display_name) = metadata.get("display_name").and_then(|v| v.as_str()) {
+                        if !display_name.is_empty() {
+                            return format!("{} ({})", display_name, pubkey.to_bech32().unwrap_or_default());
+                        }
+                    }
+                    if let Some(name) = metadata.get("name").and_then(|v| v.as_str()) {
+                        if !name.is_empty() {
+                            return format!("{} ({})", name, pubkey.to_bech32().unwrap_or_default());
+                        }
+                    }
+                }
+            }
+        },
+        Err(e) => {
+            debug!("Konnte Metadata nicht abrufen: {}", e);
+        }
+    }
+    
+    // Fallback: Nur npub
+    pubkey.to_bech32().unwrap_or_else(|_| "unknown".to_string())
+}
+
 /// Hört auf Nostr-Events und leitet sie an Telegram weiter
 async fn listen_nostr_events(
     client: Arc<Client>,
@@ -423,10 +459,13 @@ async fn listen_nostr_events(
                     info!("Nachricht erfolgreich entschlüsselt!");
                     info!("Inhalt: {}", decrypted_content);
                     
+                    // Hole Display-Name des Absenders
+                    let sender_name = get_nostr_display_name(&client, &recipient).await;
+                    
                     // Formatiere Nachricht für Telegram
                     let formatted_message = format!(
                         "📨 Nostr-DM\n👤 Von: {}\n\n{}",
-                        recipient.to_bech32().unwrap_or_else(|_| "unknown".to_string()),
+                        sender_name,
                         decrypted_content
                     );
 
