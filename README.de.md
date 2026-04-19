@@ -1,6 +1,6 @@
 # nostr-telegram-bridge
 
-Eine Bridge-Anwendung für **wechselseitige Kommunikation** zwischen einer Telegram-Gruppe und einem Nostr-User über DMs. Unterstützt **NIP-17 Gift Wrap** (empfohlen) und NIP-04 verschlüsselte Direktnachrichten mit Persistenz und Loop-Schutz.
+Eine Bridge-Anwendung für **wechselseitige Kommunikation** zwischen einer Telegram-Gruppe und einem Nostr-User über DMs. Unterstützt **NIP-17 Gift Wrap** verschlüsselte Direktnachrichten mit Persistenz und Loop-Schutz.
 
 ## ✨ Features
 
