@@ -334,6 +334,31 @@ async fn listen_nostr_events(
                 continue;
             }
 
+            // Prüfe ob die DM AN den Bridge-Bot gesendet wurde (p-tag)
+            let dm_recipient = event.tags.iter()
+                .find_map(|tag| {
+                    if let nostr_sdk::prelude::Tag::PublicKey { public_key, .. } = tag {
+                        Some(public_key)
+                    } else {
+                        None
+                    }
+                });
+
+            match dm_recipient {
+                Some(recipient_pubkey) if *recipient_pubkey == bridge_pubkey => {
+                    info!("DM ist an Bridge-Bot gerichtet, verarbeite...");
+                }
+                Some(other_pubkey) => {
+                    debug!("DM ist an anderen Empfänger gerichtet: {}, ignoriere",
+                        other_pubkey.to_bech32().unwrap_or_default());
+                    continue;
+                }
+                None => {
+                    warn!("DM hat keinen p-tag (Empfänger), ignoriere");
+                    continue;
+                }
+            }
+
             // DM entschlüsseln
             let secret_key = keys.secret_key().expect("Failed to get secret key");
             match nip04::decrypt(secret_key, &recipient, &event.content) {
