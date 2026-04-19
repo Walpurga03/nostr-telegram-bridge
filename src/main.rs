@@ -231,10 +231,15 @@ async fn handle_telegram_message(
                     timestamp,
                 };
 
-                if let Err(e) = db.save_mapping(&mapping) {
-                    error!("Fehler beim Speichern des Mappings: {}", e);
+                // Prüfen ob Event-ID bereits existiert (kann passieren wenn wir unser eigenes Event empfangen)
+                if !db.nostr_event_exists(&event_id.to_hex()).unwrap_or(false) {
+                    if let Err(e) = db.save_mapping(&mapping) {
+                        error!("Fehler beim Speichern des Mappings: {}", e);
+                    } else {
+                        debug!("Mapping gespeichert: Telegram {} -> Nostr {}", telegram_msg_id, event_id);
+                    }
                 } else {
-                    debug!("Mapping gespeichert: Telegram {} -> Nostr {}", telegram_msg_id, event_id);
+                    debug!("Event-ID bereits in Datenbank, überspringe Speicherung");
                 }
             }
             Err(e) => {
