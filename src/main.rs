@@ -287,20 +287,19 @@ async fn listen_nostr_events(
     };
 
     // Filter für DMs (Kind 4 = NIP-04 encrypted DMs)
-    // WICHTIG: Wir filtern nach dem AUTOR (wer sendet) UND nach dem p-tag (an wen)
+    // VEREINFACHTER FILTER: Nur nach Author, OHNE p-tag Filter
     let bridge_pubkey = keys.public_key();
     
-    // Filter 1: DMs VON unserem User AN den Bridge-Bot
+    // Filter: ALLE DMs VON unserem User (egal an wen)
     let filter = Filter::new()
         .kind(Kind::EncryptedDirectMessage)
         .author(recipient) // DMs VON npub1hht9...
-        .pubkey(bridge_pubkey) // AN Bridge-Bot (p-tag)
         .since(Timestamp::now());
 
-    info!("Subscribing mit Filter:");
+    info!("Subscribing mit VEREINFACHTEM Filter:");
     info!("  - Kind: EncryptedDirectMessage (4)");
     info!("  - Author (sender): {}", recipient.to_bech32().unwrap_or_default());
-    info!("  - Pubkey (recipient/p-tag): {}", bridge_pubkey.to_bech32().unwrap_or_default());
+    info!("  - Pubkey filter: DEAKTIVIERT (empfange alle DMs vom User)");
     info!("  - Since: now");
 
     let subscription_id = client.subscribe(vec![filter.clone()], None).await;
