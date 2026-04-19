@@ -287,13 +287,15 @@ async fn listen_nostr_events(
     };
 
     // Filter für DMs (Kind 4 = NIP-04 encrypted DMs)
+    // Wir hören auf DMs, die AN den Bridge-Bot gesendet werden (pubkey tag)
+    let bridge_pubkey = keys.public_key();
     let filter = Filter::new()
         .kind(Kind::EncryptedDirectMessage)
-        .author(recipient) // Nur vom konfigurierten User
+        .pubkey(bridge_pubkey) // DMs AN den Bridge-Bot
         .since(Timestamp::now());
 
     client.subscribe(vec![filter], None).await;
-    info!("Nostr-Subscription aktiv für DMs von {}", recipient.to_bech32().unwrap_or_default());
+    info!("Nostr-Subscription aktiv für DMs an Bridge-Bot von {}", recipient.to_bech32().unwrap_or_default());
 
     // Event-Stream verarbeiten
     let mut notifications = client.notifications();
