@@ -290,23 +290,28 @@ async fn listen_nostr_events(
     // VEREINFACHTER FILTER: Nur nach Author, OHNE p-tag Filter
     let bridge_pubkey = keys.public_key();
     
+    // Timestamp: 60 Sekunden in die Vergangenheit für bessere Event-Erfassung
+    let since_timestamp = Timestamp::now() - 60u64;
+    
     // Filter: ALLE DMs VON unserem User (egal an wen)
-    // Mit .since() für Echtzeit-Events
+    // Mit .since() für Echtzeit-Events (60 Sekunden zurück)
     let filter = Filter::new()
         .kind(Kind::EncryptedDirectMessage)
         .author(recipient) // DMs VON npub1hht9...
-        .since(Timestamp::now()); // Nur neue Events ab jetzt
+        .since(since_timestamp); // Events der letzten 60 Sekunden
 
     info!("Subscribing mit Echtzeit-Filter:");
     info!("  - Kind: EncryptedDirectMessage (4)");
     info!("  - Author (sender): {}", recipient.to_bech32().unwrap_or_default());
     info!("  - Pubkey filter: DEAKTIVIERT (empfange alle DMs vom User)");
-    info!("  - Since: now (nur neue Events)");
+    info!("  - Since: {} (60 Sekunden zurück)", since_timestamp);
+    info!("  - Current time: {}", Timestamp::now());
 
     let subscription_id = client.subscribe(vec![filter.clone()], None).await;
     info!("Nostr-Subscription aktiv mit ID: {:?}", subscription_id);
     info!("Bridge-Bot Pubkey: {}", bridge_pubkey.to_bech32().unwrap_or_default());
     info!("Erwarteter Sender: {}", recipient.to_bech32().unwrap_or_default());
+    info!("Warte auf Events mit created_at >= {}", since_timestamp);
 
     // Event-Stream verarbeiten
     let mut notifications = client.notifications();
