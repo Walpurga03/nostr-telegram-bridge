@@ -290,28 +290,24 @@ async fn listen_nostr_events(
     // VEREINFACHTER FILTER: Nur nach Author, OHNE p-tag Filter
     let bridge_pubkey = keys.public_key();
     
-    // Timestamp: 60 Sekunden in die Vergangenheit für bessere Event-Erfassung
-    let since_timestamp = Timestamp::now() - 60u64;
-    
     // Filter: ALLE DMs VON unserem User (egal an wen)
-    // Mit .since() für Echtzeit-Events (60 Sekunden zurück)
+    // WICHTIG: Ohne .since() um auch ältere Events zu empfangen (für Tests)
     let filter = Filter::new()
         .kind(Kind::EncryptedDirectMessage)
         .author(recipient) // DMs VON npub1hht9...
-        .since(since_timestamp); // Events der letzten 60 Sekunden
+        .limit(10); // Nur die letzten 10 Events zum Testen
 
-    info!("Subscribing mit Echtzeit-Filter:");
+    info!("Subscribing mit TEST-Filter:");
     info!("  - Kind: EncryptedDirectMessage (4)");
     info!("  - Author (sender): {}", recipient.to_bech32().unwrap_or_default());
     info!("  - Pubkey filter: DEAKTIVIERT (empfange alle DMs vom User)");
-    info!("  - Since: {} (60 Sekunden zurück)", since_timestamp);
-    info!("  - Current time: {}", Timestamp::now());
+    info!("  - Since: DEAKTIVIERT (empfange auch ältere Events)");
+    info!("  - Limit: 10 (zum Testen)");
 
     let subscription_id = client.subscribe(vec![filter.clone()], None).await;
     info!("Nostr-Subscription aktiv mit ID: {:?}", subscription_id);
     info!("Bridge-Bot Pubkey: {}", bridge_pubkey.to_bech32().unwrap_or_default());
     info!("Erwarteter Sender: {}", recipient.to_bech32().unwrap_or_default());
-    info!("Warte auf Events mit created_at >= {}", since_timestamp);
 
     // Event-Stream verarbeiten
     let mut notifications = client.notifications();
@@ -338,36 +334,16 @@ async fn listen_nostr_events(
                 continue;
             }
 
-            // Prüfe ob die DM AN den Bridge-Bot gesendet wurde (p-tag)
-            let dm_recipient = event.tags.iter()
-                .find_map(|tag| {
-                    if let nostr_sdk::prelude::Tag::PublicKey { public_key, .. } = tag {
-                        Some(public_key)
-                    } else {
-                        None
-                    }
-                });
-
-            match dm_recipient {
-                Some(recipient_pubkey) if *recipient_pubkey == bridge_pubkey => {
-                    info!("DM ist an Bridge-Bot gerichtet, verarbeite...");
-                }
-                Some(other_pubkey) => {
-                    debug!("DM ist an anderen Empfänger gerichtet: {}, ignoriere",
-                        other_pubkey.to_bech32().unwrap_or_default());
-                    continue;
-                }
-                None => {
-                    warn!("DM hat keinen p-tag (Empfänger), ignoriere");
-                    continue;
-                }
-            }
-
             // DM entschlüsseln
+            // WICHTIG: Wir müssen mit dem PUBLIC KEY des SENDERS entschlüsseln (nicht recipient)
+            // Da der Sender = recipient ist, verwenden wir recipient als Gegenpartei
             let secret_key = keys.secret_key().expect("Failed to get secret key");
-            match nip04::decrypt(secret_key, &recipient, &event.content) {
+            
+            // Der Sender ist 'recipient' (npub1hht9...), wir entschlüsseln mit dessen Public Key
+            match nip04::decrypt(secret_key, &event.pubkey, &event.content) {
                 Ok(decrypted_content) => {
-                    info!("Nostr-DM empfangen von {}", recipient.to_bech32().unwrap_or_default());
+                    info!("Nostr-DM empfangen von {}", event.pubkey.to_bech32().unwrap_or_default());
+                    info!("Entschlüsselter Inhalt: {}", decrypted_content);
                     
                     // Formatiere Nachricht für Telegram
                     let formatted_message = format!(
