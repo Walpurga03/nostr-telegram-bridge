@@ -11,6 +11,7 @@ use chrono::{NaiveDateTime, TimeZone};
 use chrono_tz::Tz;
 use std::env;
 use std::time::{SystemTime, UNIX_EPOCH};
+use serde_json;
 
 mod config;
 use crate::config::{Config, ConfigError, EncryptionType};
@@ -286,25 +287,42 @@ async fn listen_nostr_events(
         }
     };
 
-    // Filter für DMs (Kind 4 = NIP-04 encrypted DMs)
-    // VEREINFACHTER FILTER: Nur nach Author, OHNE p-tag Filter
+    // Filter für DMs - unterstützt sowohl NIP-04 als auch NIP-17
     let bridge_pubkey = keys.public_key();
     
-    // Filter: ALLE DMs VON unserem User (egal an wen)
-    // WICHTIG: Ohne .since() um auch ältere Events zu empfangen (für Tests)
-    let filter = Filter::new()
-        .kind(Kind::EncryptedDirectMessage)
-        .author(recipient) // DMs VON npub1hht9...
-        .limit(10); // Nur die letzten 10 Events zum Testen
+    // Filter basierend auf Encryption-Type
+    let filters = match config.encryption_type {
+        EncryptionType::Nip04 => {
+            info!("Konfiguriere Filter für NIP-04 (Kind 4)");
+            vec![
+                Filter::new()
+                    .kind(Kind::EncryptedDirectMessage) // Kind 4
+                    .author(recipient)
+                    .pubkey(bridge_pubkey)
+                    .limit(50)
+            ]
+        },
+        EncryptionType::Nip17 => {
+            info!("Konfiguriere Filter für NIP-17 (Kind 1059 - Gift Wrap)");
+            vec![
+                Filter::new()
+                    .kind(Kind::GiftWrap) // Kind 1059 für NIP-17
+                    .pubkey(bridge_pubkey) // AN den Bridge-Bot
+                    .limit(50)
+            ]
+        },
+        _ => {
+            warn!("Encryption-Type {:?} wird für Nostr-Listener nicht unterstützt", config.encryption_type);
+            return Ok(());
+        }
+    };
 
-    info!("Subscribing mit TEST-Filter:");
-    info!("  - Kind: EncryptedDirectMessage (4)");
-    info!("  - Author (sender): {}", recipient.to_bech32().unwrap_or_default());
-    info!("  - Pubkey filter: DEAKTIVIERT (empfange alle DMs vom User)");
-    info!("  - Since: DEAKTIVIERT (empfange auch ältere Events)");
-    info!("  - Limit: 10 (zum Testen)");
+    info!("Subscribing mit Filter:");
+    info!("  - Encryption-Type: {:?}", config.encryption_type);
+    info!("  - Bridge-Bot Pubkey: {}", bridge_pubkey.to_bech32().unwrap_or_default());
+    info!("  - Erwarteter Sender: {}", recipient.to_bech32().unwrap_or_default());
 
-    let subscription_id = client.subscribe(vec![filter.clone()], None).await;
+    let subscription_id = client.subscribe(filters.clone(), None).await;
     info!("Nostr-Subscription aktiv mit ID: {:?}", subscription_id);
     info!("Bridge-Bot Pubkey: {}", bridge_pubkey.to_bech32().unwrap_or_default());
     info!("Erwarteter Sender: {}", recipient.to_bech32().unwrap_or_default());
@@ -326,24 +344,84 @@ async fn listen_nostr_events(
                 continue;
             }
 
-            // Nur Events vom konfigurierten Empfänger
-            if event.pubkey != recipient {
-                warn!("Event von anderem Pubkey ignoriert: {} (erwartet: {})",
-                    event.pubkey.to_bech32().unwrap_or_default(),
-                    recipient.to_bech32().unwrap_or_default());
-                continue;
-            }
-
-            // DM entschlüsseln
-            // WICHTIG: Wir müssen mit dem PUBLIC KEY des SENDERS entschlüsseln (nicht recipient)
-            // Da der Sender = recipient ist, verwenden wir recipient als Gegenpartei
+            // Entschlüsseln basierend auf Event-Kind
             let secret_key = keys.secret_key().expect("Failed to get secret key");
-            
-            // Der Sender ist 'recipient' (npub1hht9...), wir entschlüsseln mit dessen Public Key
-            match nip04::decrypt(secret_key, &event.pubkey, &event.content) {
+            let decrypted_content_result = match event.kind {
+                Kind::EncryptedDirectMessage => {
+                    // NIP-04: Entschlüsseln mit nip04
+                    info!("Verarbeite NIP-04 DM (Kind 4)");
+                    
+                    // Prüfe ob vom erwarteten Sender
+                    if event.pubkey != recipient {
+                        warn!("NIP-04 Event von anderem Pubkey ignoriert: {} (erwartet: {})",
+                            event.pubkey.to_bech32().unwrap_or_default(),
+                            recipient.to_bech32().unwrap_or_default());
+                        continue;
+                    }
+                    
+                    nip04::decrypt(secret_key, &event.pubkey, &event.content)
+                        .map_err(|e| format!("NIP-04 Entschlüsselung fehlgeschlagen: {}", e))
+                },
+                Kind::GiftWrap => {
+                    // NIP-17: Gift Wrap entschlüsseln
+                    info!("Verarbeite NIP-17 Gift Wrap (Kind 1059)");
+                    
+                    // Gift Wrap ist AN uns (bridge_pubkey), entschlüsseln mit unserem Secret Key
+                    match nip44::decrypt(secret_key, &event.pubkey, &event.content) {
+                        Ok(unwrapped_json) => {
+                            info!("Gift Wrap entschlüsselt, parse Seal Event...");
+                            
+                            // Parse das Seal Event (Kind 13)
+                            match Event::from_json(&unwrapped_json) {
+                                Ok(seal_event) => {
+                                    info!("Seal Event geparst, Sender: {}", seal_event.pubkey.to_bech32().unwrap_or_default());
+                                    
+                                    // Prüfe ob vom erwarteten Sender
+                                    if seal_event.pubkey != recipient {
+                                        warn!("Seal Event von anderem Pubkey ignoriert: {} (erwartet: {})",
+                                            seal_event.pubkey.to_bech32().unwrap_or_default(),
+                                            recipient.to_bech32().unwrap_or_default());
+                                        continue;
+                                    }
+                                    
+                                    // Entschlüssele das Seal (enthält das Rumor)
+                                    match nip44::decrypt(secret_key, &seal_event.pubkey, &seal_event.content) {
+                                        Ok(rumor_json) => {
+                                            info!("Seal entschlüsselt, parse Rumor...");
+                                            
+                                            // Parse das Rumor (die eigentliche Nachricht)
+                                            match serde_json::from_str::<serde_json::Value>(&rumor_json) {
+                                                Ok(rumor) => {
+                                                    if let Some(content) = rumor.get("content").and_then(|c| c.as_str()) {
+                                                        info!("Rumor erfolgreich entschlüsselt!");
+                                                        Ok(content.to_string())
+                                                    } else {
+                                                        Err("Rumor enthält kein 'content' Feld".to_string())
+                                                    }
+                                                },
+                                                Err(e) => Err(format!("Rumor JSON parse Fehler: {}", e))
+                                            }
+                                        },
+                                        Err(e) => Err(format!("Seal Entschlüsselung fehlgeschlagen: {}", e))
+                                    }
+                                },
+                                Err(e) => Err(format!("Seal Event parse Fehler: {}", e))
+                            }
+                        },
+                        Err(e) => Err(format!("Gift Wrap Entschlüsselung fehlgeschlagen: {}", e))
+                    }
+                },
+                _ => {
+                    warn!("Unbekannter Event-Kind: {:?}", event.kind);
+                    continue;
+                }
+            };
+
+            // Verarbeite entschlüsselten Inhalt
+            match decrypted_content_result {
                 Ok(decrypted_content) => {
-                    info!("Nostr-DM empfangen von {}", event.pubkey.to_bech32().unwrap_or_default());
-                    info!("Entschlüsselter Inhalt: {}", decrypted_content);
+                    info!("Nachricht erfolgreich entschlüsselt!");
+                    info!("Inhalt: {}", decrypted_content);
                     
                     // Formatiere Nachricht für Telegram
                     let formatted_message = format!(
