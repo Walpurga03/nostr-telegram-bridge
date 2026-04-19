@@ -287,23 +287,33 @@ async fn listen_nostr_events(
     };
 
     // Filter für DMs (Kind 4 = NIP-04 encrypted DMs)
-    // TEST: Empfange ALLE DMs um zu debuggen
+    // WICHTIG: Wir filtern nach dem AUTOR (wer sendet) UND nach dem p-tag (an wen)
     let bridge_pubkey = keys.public_key();
+    
+    // Filter 1: DMs VON unserem User AN den Bridge-Bot
     let filter = Filter::new()
         .kind(Kind::EncryptedDirectMessage)
-        .pubkey(bridge_pubkey) // DMs AN den Bridge-Bot (p-tag)
+        .author(recipient) // DMs VON npub1hht9...
+        .pubkey(bridge_pubkey) // AN Bridge-Bot (p-tag)
         .since(Timestamp::now());
 
-    client.subscribe(vec![filter], None).await;
-    info!("Nostr-Subscription aktiv für DMs an Bridge-Bot");
+    info!("Subscribing mit Filter:");
+    info!("  - Kind: EncryptedDirectMessage (4)");
+    info!("  - Author (sender): {}", recipient.to_bech32().unwrap_or_default());
+    info!("  - Pubkey (recipient/p-tag): {}", bridge_pubkey.to_bech32().unwrap_or_default());
+    info!("  - Since: now");
+
+    let subscription_id = client.subscribe(vec![filter.clone()], None).await;
+    info!("Nostr-Subscription aktiv mit ID: {:?}", subscription_id);
     info!("Bridge-Bot Pubkey: {}", bridge_pubkey.to_bech32().unwrap_or_default());
     info!("Erwarteter Sender: {}", recipient.to_bech32().unwrap_or_default());
 
     // Event-Stream verarbeiten
     let mut notifications = client.notifications();
+    info!("Warte auf Notifications vom Relay-Pool...");
     
     while let Ok(notification) = notifications.recv().await {
-        debug!("Notification empfangen: {:?}", notification);
+        info!(">>> Notification empfangen: {:?}", notification);
         
         if let RelayPoolNotification::Event { event, .. } = notification {
             info!("Event empfangen! Kind: {:?}, Author: {}", event.kind, event.pubkey.to_bech32().unwrap_or_default());
