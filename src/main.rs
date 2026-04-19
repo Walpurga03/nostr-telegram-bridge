@@ -303,7 +303,11 @@ async fn listen_nostr_events(
     let mut notifications = client.notifications();
     
     while let Ok(notification) = notifications.recv().await {
+        debug!("Notification empfangen: {:?}", notification);
+        
         if let RelayPoolNotification::Event { event, .. } = notification {
+            info!("Event empfangen! Kind: {:?}, Author: {}", event.kind, event.pubkey.to_bech32().unwrap_or_default());
+            
             // Loop-Schutz: Prüfen ob Event bereits verarbeitet wurde
             let event_id_hex = event.id.to_hex();
             if db.nostr_event_exists(&event_id_hex).unwrap_or(false) {
@@ -313,7 +317,9 @@ async fn listen_nostr_events(
 
             // Nur Events vom konfigurierten Empfänger
             if event.pubkey != recipient {
-                debug!("Event von anderem Pubkey ignoriert: {}", event.pubkey);
+                warn!("Event von anderem Pubkey ignoriert: {} (erwartet: {})",
+                    event.pubkey.to_bech32().unwrap_or_default(),
+                    recipient.to_bech32().unwrap_or_default());
                 continue;
             }
 
